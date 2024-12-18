@@ -50,6 +50,8 @@ var (
 	User32UnregisterHotKey = user32.NewProc("UnregisterHotKey")
 	User32SystemParametersInfoW = user32.NewProc("SystemParametersInfoW")
 	User32SetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
+	User32CreateIconFromResourceEx = user32.NewProc("CreateIconFromResourceEx")
+	User32ReleaseCapture    = user32.NewProc("ReleaseCapture")
 )
 
 const (
@@ -198,6 +200,11 @@ const (
 	GWL_EXSTYLE = -20
 	WS_EX_LAYERED = 0x00080000
 	LWA_ALPHA = 0x00000002
+	LWA_COLORKEY = 0x00000001
+)
+
+const (
+	IMAGE_ICON = 1
 )
 
 type WndClassExW struct {
@@ -244,6 +251,8 @@ type Msg struct {
 	LPrivate uint32
 }
 
+type Handle = windows.Handle
+
 func Utf16PtrToString(p *uint16) string {
 	if p == nil {
 		return ""
@@ -269,4 +278,41 @@ func SHCreateMemStream(data []byte) (uintptr, error) {
 	}
 
 	return ret, nil
+}
+
+// GetWindowRect retrieves the dimensions of the specified window
+func GetWindowRect(hwnd windows.Handle, rect *Rect) bool {
+	ret, _, _ := User32GetWindowRect.Call(
+		uintptr(hwnd),
+		uintptr(unsafe.Pointer(rect)),
+	)
+	return ret != 0
+}
+
+// SystemParametersInfo retrieves system parameters
+func SystemParametersInfo(uiAction uint32, uiParam uint32, pvParam unsafe.Pointer, fWinIni uint32) bool {
+	ret, _, _ := User32SystemParametersInfoW.Call(
+		uintptr(uiAction),
+		uintptr(uiParam),
+		uintptr(pvParam),
+		uintptr(fWinIni),
+	)
+	return ret != 0
+}
+
+// ReleaseCapture releases the mouse capture from a window
+func ReleaseCapture() bool {
+	ret, _, _ := User32ReleaseCapture.Call()
+	return ret != 0
+}
+
+// SendMessage sends a message to the specified window
+func SendMessage(hwnd windows.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+	ret, _, _ := User32SendMessageW.Call(
+		uintptr(hwnd),
+		uintptr(msg),
+		wParam,
+		lParam,
+	)
+	return ret
 }

@@ -95,22 +95,26 @@ type WindowOptions struct {
 	EnableDragAndDrop  bool // 是否启用拖放
 	HideWindowOnClose  bool // 关闭时是否隐藏窗口而不是退出
 	DefaultBackground  string // 默认背景色 (CSS 格式，如 "#FFFFFF")
+	Opacity float64 // 初始透明度 (0.0-1.0)
+	IconPath string // 图标文件路径
+	IconData []byte // 图标进制数据
 }
 
 // 添加默认配置
 func DefaultWindowOptions() WindowOptions {
 	return WindowOptions{
 		Title:       "WebView2",
-		Width:       800,
-		Height:      600,
-		Center:      true,
-		Resizable:   true,
-		Minimizable: true,
-		Maximizable: true,
-		DisableContextMenu: false,
-		EnableDragAndDrop: true,
-		HideWindowOnClose: false,
-		DefaultBackground: "#FFFFFF",
+			Width:       800,
+			Height:      600,
+			Center:      true,
+			Resizable:   true,
+			Minimizable: true,
+			Maximizable: true,
+			DisableContextMenu: false,
+			EnableDragAndDrop: true,
+			HideWindowOnClose: false,
+			DefaultBackground: "#FFFFFF",
+			Opacity: 1.0, // 默认完全不透明
 	}
 }
 
@@ -144,7 +148,7 @@ func NewWindow(debug bool, window unsafe.Pointer) WebView {
 	return NewWithOptions(WebViewOptions{Debug: debug, Window: window})
 }
 
-// NewWithOptions 使用提供的选项创建一个新的 webview。
+// NewWithOptions 使用提供的选项创建一个的 webview。
 func NewWithOptions(options WebViewOptions) WebView {
 	// 合并默认选项
 	defaultOpts := DefaultWindowOptions()
@@ -202,7 +206,7 @@ func NewWithOptions(options WebViewOptions) WebView {
 	if err != nil {
 		log.Fatal(err)
 	}
-	//禁用开发者工具
+	//禁用开者工具
 	err = settings.PutAreDevToolsEnabled(options.Debug)
 	if err != nil {
 		log.Fatal(err)
@@ -312,6 +316,11 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 		case w32.WMMove, w32.WMMoving:
 			_ = w.browser.NotifyParentWindowPositionChanged()
 		case w32.WMNCLButtonDown:
+			if wp == w32.HTCaption {
+				// 直接调用 DefWindowProc 处理拖动
+				r, _, _ := w32.User32DefWindowProcW.Call(hwnd, msg, wp, lp)
+				return r
+			}
 			_, _, _ = w32.User32SetFocus.Call(w.hwnd)
 			r, _, _ := w32.User32DefWindowProcW.Call(hwnd, msg, wp, lp)
 			return r
@@ -387,7 +396,7 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			w.m.Lock()
 			if handler, ok := w.hotkeys[int(wp)]; ok {
 				w.m.Unlock()
-				handler()
+					handler()
 			} else {
 				w.m.Unlock()
 			}
@@ -415,7 +424,7 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		return false
 	}
 
-	icon := w.loadWindowIcon(hinstance, opts.IconId)
+	icon := w.loadWindowIcon(hinstance, opts.IconId, opts)
 	if icon == 0 {
 		log.Printf("Warning: Failed to load window icon")
 	}
@@ -456,29 +465,22 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		posY = w32.CW_USEDEFAULT
 	}
 
-	var style uint32 = w32.WSOverlappedWindow
+	// 添加分层窗口样式以支持透明度
+	style := w32.WSOverlappedWindow
 	if opts.Frameless {
 		style = w32.WSPopup | w32.WSVisible
-	} else {
-		// 根据选项调整窗口样式
-		if !opts.Resizable {
-			style &^= w32.WSThickFrame
-		}
-		if !opts.Minimizable {
-			style &^= w32.WSMinimizeBox
-		}
-		if !opts.Maximizable {
-			style &^= w32.WSMaximizeBox
-		}
 	}
-
+	
+	// 添加分层窗口扩展样式
+	exStyle := w32.WS_EX_LAYERED
+	
 	w.hwnd, _, _ = w32.User32CreateWindowExW.Call(
-		0,
+		uintptr(exStyle), // 使用扩展样式
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
-		uintptr(style), // 使用新的式
+		uintptr(style),
 		uintptr(posX),
-		uintptr(posY),
+		uintptr(posY), 
 		uintptr(windowWidth),
 		uintptr(windowHeight),
 		0,
@@ -486,6 +488,15 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		uintptr(hinstance),
 		0,
 	)
+	
+	// 设置初始透明度(默认完全不透明)
+	_, _, _ = w32.User32SetLayeredWindowAttributes.Call(
+		w.hwnd,
+		0,
+		255, // 完全不透明
+		w32.LWA_ALPHA,
+	)
+
 	setWindowContext(w.hwnd, w)
 
 	_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_SHOW)
@@ -703,28 +714,62 @@ func (w *webview) Bind(name string, f interface{}) error {
 	return nil
 }
 
-func (w *webview) loadWindowIcon(hinstance windows.Handle, iconId uint) uintptr {
-	if iconId == 0 {
-		icow, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCxIcon)
-		icoh, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCyIcon)
-		icon, _, _ := w32.User32LoadImageW.Call(
-			uintptr(hinstance),
-			32512,
-			icow,
-			icoh,
-			0,
-			0,
+func (w *webview) loadWindowIcon(hinstance windows.Handle, iconId uint, opts WindowOptions) uintptr {
+	// 1. 优先使用 IconData
+	if len(opts.IconData) > 0 {
+		icon, _, _ := w32.User32CreateIconFromResourceEx.Call(
+			uintptr(unsafe.Pointer(&opts.IconData[0])),
+			uintptr(len(opts.IconData)),
+			1, // IMAGE_ICON
+			0x00030000, // 版本
+			0, 0,
+			w32.LR_DEFAULTSIZE,
 		)
-		return icon
+		if icon != 0 {
+			return icon
+		}
 	}
 
+	// 2. 其次使用 IconPath
+	if opts.IconPath != "" {
+		iconPath, _ := windows.UTF16PtrFromString(opts.IconPath)
+		icon, _, _ := w32.User32LoadImageW.Call(
+			0,
+			uintptr(unsafe.Pointer(iconPath)),
+			1, // IMAGE_ICON
+			0, 0,
+			w32.LR_LOADFROMFILE|w32.LR_DEFAULTSIZE,
+		)
+		if icon != 0 {
+			return icon
+		}
+	}
+
+	// 3. 再次使用 IconId
+	if iconId != 0 {
+		icon, _, _ := w32.User32LoadImageW.Call(
+			uintptr(hinstance),
+			uintptr(iconId),
+			1,
+			0,
+			0,
+			w32.LR_DEFAULTSIZE|w32.LR_SHARED,
+		)
+		if icon != 0 {
+			return icon
+		}
+	}
+
+	// 4. 最后使用默认图标
+	icow, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCxIcon)
+	icoh, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCyIcon)
 	icon, _, _ := w32.User32LoadImageW.Call(
-		uintptr(hinstance),
-		uintptr(iconId),
-		1,
 		0,
-		0,
-		w32.LR_DEFAULTSIZE|w32.LR_SHARED,
+		32512, // IDI_APPLICATION
+		1, // IMAGE_ICON
+		icow,
+		icoh,
+		w32.LR_SHARED,
 	)
 	return icon
 }
@@ -748,7 +793,7 @@ func (w *webview) RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandl
 	w.m.Lock()
 	defer w.m.Unlock()
 
-	// 化热键映射
+	// 化热键映
 	if w.hotkeys == nil {
 		w.hotkeys = make(map[int]HotKeyHandler)
 	}
@@ -780,7 +825,7 @@ func (w *webview) UnregisterHotKey(modifiers int, keyCode int) {
 	// 查找对应的热键ID
 	var hotkeyID int
 	for id := range w.hotkeys {
-		// 这里简化处理，实际应该保modifiers和keyCode来确保全配
+		// 里简化处理，实际应该保modifiers和keyCode来确保全配
 		hotkeyID = id
 		break
 	}
@@ -804,20 +849,20 @@ func (w *webview) RegisterHotKeyString(hotkey string, handler HotKeyHandler) err
 // SetFullscreen 设置窗口全屏状态
 func (w *webview) SetFullscreen(enable bool) {
 	if enable {
-		// 保存当前窗口位置和大小用于还原
+		// 保存前窗口位置和大小用于还原
 		var rect w32.Rect
 		_, _, _ = w32.User32GetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rect)))
 
-		// 获取主显示器的完整尺寸（包括任务栏）
+		// 获取主显示器的完整尺寸（包括任务栏
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
 		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
 
 		// 移除窗口边框样式
-		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF))
 		style &^= w32.WSOverlappedWindow
-		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF), style)
 
-		// 设置全 - 使用整个屏幕尺寸
+		// 设置全屏 - 使用整个屏幕尺寸
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd,
 			uintptr(w32.HWND_TOP),
@@ -828,10 +873,21 @@ func (w *webview) SetFullscreen(enable bool) {
 			w32.SWP_FRAMECHANGED,
 		)
 	} else {
-		// 恢复窗口样式
-		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
-		style |= w32.WSOverlappedWindow
-		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
+		// 获取当前窗口样式
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF))
+		
+		// 检查是否为无边框窗口
+		isFrameless := (style & w32.WSPopup) != 0
+		
+		if !isFrameless {
+			// 如果不是无边框窗口，恢复普通窗口样式
+			style |= w32.WSOverlappedWindow
+		} else {
+			// 如果是无边框窗口，保持 WSPopup 样式
+			style = w32.WSPopup | w32.WSVisible
+		}
+		
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF), style)
 
 		// 获取屏幕尺寸
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
@@ -857,6 +913,11 @@ func (w *webview) SetFullscreen(enable bool) {
 		)
 	}
 	w.browser.Resize()
+	
+	// 触发全屏状态改变回调
+	if w.onFullscreenChanged != nil {
+		w.onFullscreenChanged(enable)
+	}
 }
 
 // SetAlwaysOnTop 设置窗口置顶状态
@@ -920,25 +981,28 @@ func (w *webview) Center() {
 	})
 }
 
-// 设置窗口透明度
+// SetOpacity 设置窗口透明度
 func (w *webview) SetOpacity(opacity float64) {
 	if opacity < 0 {
 		opacity = 0
 	}
 	if opacity > 1 {
-		opacity = 1
+		opacity = 1 
 	}
-
+	
 	w.Dispatch(func() {
-		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
-		style |= uintptr(w32.WS_EX_LAYERED)
-
+		// 确保窗口有分层属性
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))  // 使用 ^uintptr(15) 替代 GWL_EXSTYLE
+		style |= w32.WS_EX_LAYERED
+		
 		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
+		
+		// 设置透明度
 		_, _, _ = w32.User32SetLayeredWindowAttributes.Call(
 			w.hwnd,
 			0,
-			uintptr(opacity*255),
-			uintptr(w32.LWA_ALPHA),
+			uintptr(opacity * 255),
+			w32.LWA_ALPHA,
 		)
 	})
 }
@@ -1104,7 +1168,7 @@ func (w *webview) RunAsync() {
 				}
 			}
 
-			// 处理分发的消息
+			// 处理分发的息
 			if msg.Message == w32.WMApp {
 				w.m.Lock()
 				if len(w.dispatchq) > 0 {
@@ -1186,7 +1250,7 @@ func (w *webview) ClearJSHooks() {
 	w.jsHooks = nil
 }
 
-// processScript 处理脚本，应用所有钩子
+// processScript 处理脚本，用所有钩子
 func (w *webview) processScript(script string, hookType JSHookType) string {
 	w.m.Lock()
 	defer w.m.Unlock()

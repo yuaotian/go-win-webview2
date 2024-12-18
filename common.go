@@ -84,6 +84,7 @@ type WebView interface {
 	RegisterHotKeyString(hotkey string, handler HotKeyHandler) error
 
 	// 窗口状态
+	// 设置全屏
 	SetFullscreen(enable bool)
 	// 设置置顶
 	SetAlwaysOnTop(enable bool)

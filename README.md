@@ -18,7 +18,10 @@
   <a href="#特性">特性</a> •
   <a href="#安装">安装</a> •
   <a href="#使用示例">使用示例</a> •
-  <a href="#文档">文档</a>
+  <a href="#API参考">API参考</a> •
+  <a href="#性能优化">性能优化</a> •
+  <a href="#错误处理">错误处理</a> •
+  <a href="#最佳实践">最佳实践</a>
 </p>
 
 > 🌟 基于Microsoft Edge WebView2的Go语言界面开发包,提供简单易用的API接口。本项目基于[webview/webview](https://github.com/webview/webview) | [jchv/go-webview2](https://github.com/jchv/go-webview2)改进,专注于Windows平台的WebView2功能增强。
@@ -187,7 +190,7 @@ func main() {
 }
 ```
 
-### WebSocket通信示例
+### WebSocket��信示例
 ```go
 // 设置WebSocket消息处理器
 w.OnWebSocketMessage(func(message string) {
@@ -243,7 +246,7 @@ w.RegisterHotKeyString("Ctrl+Q", func() {
 
 // 注册功能热键
 w.RegisterHotKeyString("F11", func() {
-    log.Println("切换全屏...")
+    log.Println("切换全���...")
     // 在这里保存当前状态
     isFullscreen := false // 实际应用中需要跟踪此状态
     isFullscreen = !isFullscreen
@@ -310,68 +313,312 @@ w.Eval(`
 ```
 
 ### 窗口样式定制示例
+
+#### 基础窗口配置
 ```go
 // 创建自定义样式的窗口
 w := webview2.NewWithOptions(webview2.WebViewOptions{
     Debug: true,
     WindowOptions: webview2.WindowOptions{
-        Title:       "自定义样式示例",
-        Width:       800,
-        Height:      600,
-        Center:      true,
-        Frameless:   true,  // 无边框模式
-        AlwaysOnTop: true,  // 窗口置顶
+        Title:              "现代化窗口示例",
+        Width:              1024,
+        Height:             768,
+        Center:            true,
+        Frameless:         true,  // 无边框模式
+        AlwaysOnTop:       false,
+        DisableContextMenu: false,
+        DefaultBackground: "#ffffff",
+        Opacity:           1.0,
+        Resizable:         true,
     },
 })
+```
 
-// 注入自定义样式
-w.Init(`
-    // 添加自定义标题栏
-    const titleBar = document.createElement('div');
-    titleBar.innerHTML = `+"`"+`
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 10px;">
-            <div class="title">自定义标题栏</div>
-            <div class="controls">
-                <button onclick="minimize()">-</button>
-                <button onclick="maximize()">□</button>
-                <button onclick="closeWindow()">×</button>
-            </div>
-        </div>
-    `+"`"+`;
-    titleBar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:30px;background:#f0f0f0;-webkit-app-region:drag;';
-    document.body.appendChild(titleBar);
+#### 窗口状态管理
+```go
+// 定义窗口状态结构
+type WindowState struct {
+    sync.Mutex
+    isFullscreen bool
+    isMaximized  bool
+    isMinimized  bool
+    opacity      float64
+    lastWidth    int
+    lastHeight   int
+    lastX        int
+    lastY        int
+}
 
-    // 添加控制按钮样式
-    const style = document.createElement('style');
-    style.textContent = `+"`"+`
-        .controls button {
+// 初始化窗口状态
+state := &WindowState{
+    opacity: 1.0,
+}
+```
+
+#### 自定义标题栏和窗口控制
+```go
+// 注入HTML和CSS样式
+w.SetHtml(`
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        :root {
+            --primary-color: #2196F3;
+            --hover-color: #1976D2;
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --title-bar-height: 36px;
+            --resize-area: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body { 
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
+            background: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .title-bar {
+            -webkit-app-region: drag;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--title-bar-height);
+            background: var(--primary-color);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 16px;
+            z-index: 9998;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            -webkit-app-region: no-drag;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .ctrl-btn {
             border: none;
             background: none;
-            padding: 5px 10px;
+            color: white;
+            width: 46px;
+            height: var(--title-bar-height);
             cursor: pointer;
-            -webkit-app-region: no-drag;
+            font-size: 14px;
+            transition: all 0.2s ease;
         }
-        .controls button:hover {
-            background: #e0e0e0;
+
+        .ctrl-btn:hover {
+            background: var(--hover-color);
         }
-    `+"`"+`;
-    document.head.appendChild(style);
+
+        .close-btn:hover {
+            background: #e81123 !important;
+        }
+
+        .resize-handle {
+            position: fixed;
+            z-index: 9999;
+        }
+
+        .resize-handle.top { top: 0; left: var(--resize-area); right: var(--resize-area); height: var(--resize-area); cursor: n-resize; }
+        .resize-handle.right { top: var(--resize-area); right: 0; bottom: var(--resize-area); width: var(--resize-area); cursor: e-resize; }
+        .resize-handle.bottom { bottom: 0; left: var(--resize-area); right: var(--resize-area); height: var(--resize-area); cursor: s-resize; }
+        .resize-handle.left { top: var(--resize-area); left: 0; bottom: var(--resize-area); width: var(--resize-area); cursor: w-resize; }
+        .resize-handle.top-left { top: 0; left: 0; width: var(--resize-area); height: var(--resize-area); cursor: nw-resize; }
+        .resize-handle.top-right { top: 0; right: 0; width: var(--resize-area); height: var(--resize-area); cursor: ne-resize; }
+        .resize-handle.bottom-left { bottom: 0; left: 0; width: var(--resize-area); height: var(--resize-area); cursor: sw-resize; }
+        .resize-handle.bottom-right { bottom: 0; right: 0; width: var(--resize-area); height: var(--resize-area); cursor: se-resize; }
+    </style>
+</head>
+<body>
+    <div class="title-bar">
+        <div class="title">现代化窗口示例</div>
+        <div class="controls">
+            <button class="ctrl-btn" onclick="window.minimize()" title="最小化">─</button>
+            <button class="ctrl-btn" onclick="window.toggleMaximize()" title="最大化">□</button>
+            <button class="ctrl-btn close-btn" onclick="window.closeWindow()" title="关闭">×</button>
+        </div>
+    </div>
+    <div id="content">
+        <!-- 页面内容 -->
+    </div>
+</body>
+</html>
 `)
-
-// 绑定窗口控制函数
-w.Bind("minimize", func() {
-    w.Minimize()
-})
-
-w.Bind("maximize", func() {
-    // 这里可以添加最大化/还原的切换逻辑
-    w.Maximize()
-})
-
-w.Bind("closeWindow", func() {
-    w.Terminate()
-})
 ```
+
+#### 窗口控制函数绑定
+```go
+// 绑定窗口控制函数
+func bindWindowControls(w webview2.WebView, state *WindowState) {
+    // 最小化
+    w.Bind("minimize", func() {
+        state.Lock()
+        state.isMinimized = true
+        state.Unlock()
+        w.Minimize()
+    })
+
+    // 最大化切换
+    w.Bind("toggleMaximize", func() {
+        state.Lock()
+        defer state.Unlock()
+
+        state.isMaximized = !state.isMaximized
+        if state.isMaximized {
+            // 保存当前窗口位置和大小
+            var rect w32.Rect
+            w32.GetWindowRect(w32.Handle(w.Window()), &rect)
+            state.lastX = int(rect.Left)
+            state.lastY = int(rect.Top)
+            state.lastWidth = int(rect.Right - rect.Left)
+            state.lastHeight = int(rect.Bottom - rect.Top)
+            w.Maximize()
+        } else {
+            w.Restore()
+        }
+    })
+
+    // 关闭窗口
+    w.Bind("closeWindow", func() {
+        w.Terminate()
+    })
+
+    // 窗口拖动
+    w.Bind("startDragging", func() {
+        hwnd := w.Window()
+        w32.ReleaseCapture()
+        w32.SendMessage(w32.Handle(uintptr(hwnd)), w32.WMNCLButtonDown, w32.HTCaption, 0)
+    })
+
+    // 窗口大小调整
+    w.Bind("startResizing", func(edge string) {
+        hwnd := w.Window()
+        w32.ReleaseCapture()
+        var hitTest uintptr
+        switch edge {
+        case "top":
+            hitTest = w32.HTTop
+        case "right":
+            hitTest = w32.HTRight
+        case "bottom":
+            hitTest = w32.HTBottom
+        case "left":
+            hitTest = w32.HTLeft
+        case "topLeft":
+            hitTest = w32.HTTopLeft
+        case "topRight":
+            hitTest = w32.HTTopRight
+        case "bottomLeft":
+            hitTest = w32.HTBottomLeft
+        case "bottomRight":
+            hitTest = w32.HTBottomRight
+        }
+        w32.SendMessage(w32.Handle(uintptr(hwnd)), w32.WMNCLButtonDown, hitTest, 0)
+    })
+}
+```
+
+#### 注册快捷键
+```go
+// 注册窗口控制快捷键
+func registerHotkeys(w webview2.WebView, state *WindowState) {
+    // Ctrl+Q 退出
+    w.RegisterHotKeyString("Ctrl+Q", func() {
+        w.Terminate()
+    })
+
+    // Ctrl+M 最小化
+    w.RegisterHotKeyString("Ctrl+M", func() {
+        state.Lock()
+        state.isMinimized = !state.isMinimized
+        state.Unlock()
+        if state.isMinimized {
+            w.Minimize()
+        } else {
+            w.Restore()
+        }
+    })
+
+    // F11 全屏
+    w.RegisterHotKeyString("F11", func() {
+        state.Lock()
+        state.isFullscreen = !state.isFullscreen
+        state.Unlock()
+        w.SetFullscreen(state.isFullscreen)
+    })
+}
+```
+
+#### JavaScript事件处理
+```javascript
+// 添加到HTML中的JavaScript代码
+document.addEventListener('DOMContentLoaded', function() {
+    var titleBar = document.querySelector('.title-bar');
+    
+    // 添加窗口大小调整句柄
+    var resizeAreas = [
+        { class: 'top', edge: 'top' },
+        { class: 'right', edge: 'right' },
+        { class: 'bottom', edge: 'bottom' },
+        { class: 'left', edge: 'left' },
+        { class: 'top-left', edge: 'topLeft' },
+        { class: 'top-right', edge: 'topRight' },
+        { class: 'bottom-left', edge: 'bottomLeft' },
+        { class: 'bottom-right', edge: 'bottomRight' }
+    ];
+
+    resizeAreas.forEach(area => {
+        var handle = document.createElement('div');
+        handle.className = 'resize-handle ' + area.class;
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            window.startResizing(area.edge);
+        });
+        document.body.appendChild(handle);
+    });
+
+    // 窗口拖动
+    titleBar.addEventListener('mousedown', function(e) {
+        if (!e.target.closest('.controls')) {
+            window.startDragging();
+        }
+    });
+});
+```
+
+这个示例展示了如何创建一个现代化的自定义窗口，包括：
+
+1. 自定义标题栏
+2. 窗口拖动
+3. 边缘调整大小
+4. 最大化/最小化/关闭控制
+5. 快捷键支持
+6. 窗口状态管理
+7. 平滑动画过渡
+8. 响应式布局
+
+主要特点：
+- 无边框设计
+- 现代化UI风格
+- 完整的窗口控制
+- 状态同步管理
+- 用户体验优化
 
 ### WebSocket高级示例
 ```go
@@ -481,6 +728,236 @@ w.Init(`
         console.log('收到消息:', data);
     });
 `)
+```
+
+## 🛠 性能优化
+
+### 内存管理
+```go
+// 使用对象池复用WebView实例
+var webviewPool = sync.Pool{
+    New: func() interface{} {
+        return webview2.NewWithOptions(webview2.WebViewOptions{
+            Debug: false,
+            WindowOptions: webview2.WindowOptions{
+                Width:  800,
+                Height: 600,
+            },
+        })
+    },
+}
+
+// 获取WebView实例
+w := webviewPool.Get().(webview2.WebView)
+defer webviewPool.Put(w)
+```
+
+### 资源释放
+```go
+// 确保资源正确释放
+func cleanup(w webview2.WebView) {
+    w.Eval(`
+        // 清理DOM事件监听器
+        document.querySelectorAll('*').forEach(el => {
+            el.replaceWith(el.cloneNode(true));
+        });
+        // 清理WebSocket连接
+        if(window._ws) {
+            window._ws.close();
+        }
+        // 清理定时器
+        for(let i = setTimeout(()=>{}, 0); i > 0; i--) {
+            clearTimeout(i);
+        }
+    `)
+    w.Destroy()
+}
+```
+
+### 渲染优化
+```go
+// 优化渲染性能
+w.Init(`
+    // 使用CSS containment优化重排
+    .optimized-container {
+        contain: content;
+    }
+    
+    // 使用transform代替top/left
+    .animated-element {
+        transform: translate3d(0, 0, 0);
+        will-change: transform;
+    }
+    
+    // 避免大量DOM操作
+    const fragment = document.createDocumentFragment();
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.textContent = item;
+        fragment.appendChild(div);
+    });
+    container.appendChild(fragment);
+`)
+```
+
+## ⚠️ 错误处理
+
+### 全局错误处理
+```go
+func setupErrorHandling(w webview2.WebView) {
+    // JavaScript错误处理
+    w.Init(`
+        window.onerror = function(msg, url, line, col, error) {
+            console.error('JavaScript错误:', {
+                message: msg,
+                url: url,
+                line: line,
+                column: col,
+                error: error
+            });
+            return false;
+        };
+        
+        window.onunhandledrejection = function(event) {
+            console.error('未处理的Promise拒绝:', event.reason);
+        };
+    `)
+    
+    // Go端错误处理
+    w.Bind("handleError", func(err string) {
+        log.Printf("应用错误: %s", err)
+        // 可以添加错误上报逻辑
+    })
+}
+```
+
+### 优雅降级
+```go
+// 功能检测和降级处理
+w.Init(`
+    // WebSocket支持检测
+    if (!window.WebSocket) {
+        console.warn('浏览器不支持WebSocket,使用轮询替代');
+        startPolling();
+    }
+    
+    // 存储API检测
+    const storage = window.localStorage || {
+        _data: {},
+        setItem(id, val) { this._data[id] = val; },
+        getItem(id) { return this._data[id]; }
+    };
+`)
+```
+
+### 错误恢复
+```go
+// 实现错误恢复机制
+func recoverableOperation(w webview2.WebView, operation func() error) {
+    const maxRetries = 3
+    var err error
+    
+    for i := 0; i < maxRetries; i++ {
+        err = operation()
+        if err == nil {
+            return
+        }
+        log.Printf("操作失败(重试 %d/%d): %v", i+1, maxRetries, err)
+        time.Sleep(time.Second * time.Duration(i+1))
+    }
+    
+    // 最终失败处理
+    w.Eval(`alert('操作失败,请稍后重试')`)
+}
+```
+
+## 📚 最佳实践
+
+### 代码组织
+```go
+// 模块化组织代码
+type Application struct {
+    webview webview2.WebView
+    state   *WindowState
+    config  *Config
+}
+
+func NewApplication() *Application {
+    return &Application{
+        webview: webview2.NewWithOptions(defaultOptions),
+        state:   NewWindowState(),
+        config:  LoadConfig(),
+    }
+}
+
+func (app *Application) Initialize() {
+    app.setupErrorHandling()
+    app.setupEventListeners()
+    app.setupHotkeys()
+    app.loadInitialContent()
+}
+```
+
+### 状态管理
+```go
+// 使用发布订阅模式管理状态
+type StateManager struct {
+    state     map[string]interface{}
+    listeners map[string][]func(interface{})
+    mu        sync.RWMutex
+}
+
+func (sm *StateManager) Subscribe(key string, listener func(interface{})) {
+    sm.mu.Lock()
+    defer sm.mu.Unlock()
+    sm.listeners[key] = append(sm.listeners[key], listener)
+}
+
+func (sm *StateManager) SetState(key string, value interface{}) {
+    sm.mu.Lock()
+    sm.state[key] = value
+    listeners := sm.listeners[key]
+    sm.mu.Unlock()
+    
+    for _, listener := range listeners {
+        listener(value)
+    }
+}
+```
+
+### 安全实践
+```go
+// 实现CSP策略
+w.Init(`
+    // 添加CSP meta标签
+    const meta = document.createElement('meta');
+    meta.httpEquiv = 'Content-Security-Policy';
+    meta.content = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';";
+    document.head.appendChild(meta);
+    
+    // 防止XSS
+    function sanitizeHTML(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+`)
+
+// 实现安全的消息传递
+type SecureMessage struct {
+    Payload   interface{} `json:"payload"`
+    Timestamp int64      `json:"timestamp"`
+    Signature string     `json:"signature"`
+}
+
+func (app *Application) sendSecureMessage(payload interface{}) {
+    msg := SecureMessage{
+        Payload:   payload,
+        Timestamp: time.Now().Unix(),
+        Signature: app.generateSignature(payload),
+    }
+    app.webview.Eval(fmt.Sprintf("window.handleSecureMessage(%s)", toJSON(msg)))
+}
 ```
 
 ## 🛠 API参考
