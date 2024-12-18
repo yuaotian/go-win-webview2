@@ -1093,8 +1093,7 @@ w.Init(`
 
 ## 📊 项目状态
 
-![Alt](https://repobeats.axiom.co/api/embed/your-analytics-hash.svg "Repobeats analytics image")
-
+![Alt](https://repobeats.axiom.co/api/embed/ecb5d20141b4b9e0f8457642227c9f406e610888.svg "Repobeats analytics image")
 ---
 
 <p align="center">
