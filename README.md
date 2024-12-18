@@ -18,13 +18,15 @@
   <a href="#特性">特性</a> •
   <a href="#安装">安装</a> •
   <a href="#使用示例">使用示例</a> •
-  <a href="#API参考">API参考</a> •
+  <a href="#api参考">API参考</a> •
   <a href="#性能优化">性能优化</a> •
   <a href="#错误处理">错误处理</a> •
   <a href="#最佳实践">最佳实践</a>
 </p>
 
 > 🌟 基于Microsoft Edge WebView2的Go语言界面开发包,提供简单易用的API接口。本项目基于[webview/webview](https://github.com/webview/webview) | [jchv/go-webview2](https://github.com/jchv/go-webview2)改进,专注于Windows平台的WebView2功能增强。
+
+## 📦 快速开始
 
 ## ✨ 特性
 
@@ -62,7 +64,7 @@
   - 打印功能(直接打印/PDF导出)
 
 ### 事件监听
-- 📡 丰富的事件回调
+- 📡 丰富的���件回调
   - 页面加载状态
   - URL变化
   - 标题变化
@@ -71,7 +73,7 @@
 ### 扩展功能
 - ⚡ WebSocket支持
   - 内置WebSocket服务器
-  - 双向实时通信
+  - ��向实时通信
   - 消息处理回调
 - 🔌 JavaScript Hook机制
   - 前置/后置处理钩子
@@ -246,7 +248,7 @@ w.RegisterHotKeyString("Ctrl+Q", func() {
 
 // 注册功能热键
 w.RegisterHotKeyString("F11", func() {
-    log.Println("切换全屏...")
+    log.Println("��换全屏...")
     // 在这里保存当前状态
     isFullscreen := false // 实际应用中需要跟踪此状态
     isFullscreen = !isFullscreen
@@ -255,7 +257,7 @@ w.RegisterHotKeyString("F11", func() {
 
 // 注册组合键
 w.RegisterHotKeyString("Ctrl+Shift+D", func() {
-    log.Println("打开开发者工具...")
+    log.Println("���开开发者工具...")
     w.OpenDevTools()
 })
 
@@ -571,7 +573,7 @@ func registerHotkeys(w webview2.WebView, state *WindowState) {
 document.addEventListener('DOMContentLoaded', function() {
     var titleBar = document.querySelector('.title-bar');
     
-    // 添加窗口大小调整句柄
+    // 添加窗大小调整句柄
     var resizeAreas = [
         { class: 'top', edge: 'top' },
         { class: 'right', edge: 'right' },
@@ -616,9 +618,9 @@ document.addEventListener('DOMContentLoaded', function() {
 主要特点：
 - 无边框设计
 - 现代化UI风格
-- 完整的窗口控制
+- 完整���窗口控制
 - 状态同步管理
-- 用户体验优化
+- 用户体验化
 
 ### WebSocket高级示例
 ```go
@@ -765,7 +767,7 @@ func cleanup(w webview2.WebView) {
         if(window._ws) {
             window._ws.close();
         }
-        // 清理定时器
+        // 清理定时
         for(let i = setTimeout(()=>{}, 0); i > 0; i--) {
             clearTimeout(i);
         }
@@ -982,7 +984,7 @@ func (app *Application) sendSecureMessage(payload interface{}) {
 | `Back()` | 后退 |
 | `Forward()` | 前进 |
 | `Stop()` | 停止加载 |
-| `ClearCache()` | 清除缓存 |
+| `ClearCache()` | 清除���存 |
 | `ClearCookies()` | 清除Cookies |
 
 ### 开发工具
@@ -1037,7 +1039,7 @@ w.Init(`
 
 ### Q: 如何优化WebSocket连接?
 ```go
-// 启用带自动重连的WebSocket
+// 启用带动重连的WebSocket
 w.Init(`
     function connectWebSocket() {
         if (!window._webSocket || window._webSocket.readyState !== 1) {
