@@ -68,7 +68,7 @@
 ### 扩展功能
 - ⚡ WebSocket支持
   - 内置WebSocket服务器
-  - ��向实时通信
+  - 双向实时通信
   - 消息处理回调
 - 🔌 JavaScript Hook机制
   - 前置/后置处理钩子

@@ -535,7 +535,7 @@ func injectUIComponents(w webview2.WebView) {
 			}
 		}
 
-		// 添加新���样式
+		// 添加样式
 		const extraStyles = document.createElement('style');
 		extraStyles.textContent = ` + "`" + `
 			.button-group {
