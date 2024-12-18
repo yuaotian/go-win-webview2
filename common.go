@@ -1,84 +1,173 @@
 package webview2
 
-import "unsafe"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"unsafe"
 
-// This is copied from webview/webview.
-// The documentation is included for convenience.
+	"github.com/jchv/go-webview2/internal/w32"
+)
 
-// Hint is used to configure window sizing and resizing behavior.
+// 错误定义
+var (
+	ErrInvalidFunction  = errors.New("only functions can be bound")
+	ErrTooManyReturns   = errors.New("function may only return a value or a value+error") 
+	ErrInvalidReturnType = errors.New("second return value must be an error")
+)
+
+// 在错误定义之后添加
+// HotKeyHandler 是热键处理函数的类型
+type HotKeyHandler func()
+
+//提示用于配置窗口大小和调整大小行为。
 type Hint int
 
 const (
-	// HintNone specifies that width and height are default size
+	//HintNone 指定宽度和高度为默认尺寸
 	HintNone Hint = iota
 
-	// HintFixed specifies that window size can not be changed by a user
+	//HintFixed 指定用户无法更改窗口大小
 	HintFixed
 
-	// HintMin specifies that width and height are minimum bounds
+	//HintMin 指定宽度和高度为最小边界
 	HintMin
 
-	// HintMax specifies that width and height are maximum bounds
+	//HintMax 指定宽度和高度为最大边界
 	HintMax
 )
 
-// WebView is the interface for the webview.
+//WebView是webview的接口。
 type WebView interface {
+	// 上下文管理相关方法
+	Context() context.Context
+	WithContext(ctx context.Context) WebView
 
-	// Run runs the main loop until it's terminated. After this function exits -
-	// you must destroy the webview.
+	// 窗口控制
 	Run()
-
-	// Terminate stops the main loop. It is safe to call this function from
-	// a background thread.
 	Terminate()
-
-	// Dispatch posts a function to be executed on the main thread. You normally
-	// do not need to call this function, unless you want to tweak the native
-	// window.
 	Dispatch(f func())
-
-	// Destroy destroys a webview and closes the native window.
 	Destroy()
-
-	// Window returns a native window handle pointer. When using GTK backend the
-	// pointer is GtkWindow pointer, when using Cocoa backend the pointer is
-	// NSWindow pointer, when using Win32 backend the pointer is HWND pointer.
 	Window() unsafe.Pointer
-
-	// SetTitle updates the title of the native window. Must be called from the UI
-	// thread.
 	SetTitle(title string)
-
-	// SetSize updates native window size. See Hint constants.
 	SetSize(w int, h int, hint Hint)
-
-	// Navigate navigates webview to the given URL. URL may be a data URI, i.e.
-	// "data:text/text,<html>...</html>". It is often ok not to url-encode it
-	// properly, webview will re-encode it for you.
 	Navigate(url string)
-
-	// SetHtml sets the webview HTML directly.
-	// The origin of the page is `about:blank`.
 	SetHtml(html string)
-
-	// Init injects JavaScript code at the initialization of the new page. Every
-	// time the webview will open a the new page - this initialization code will
-	// be executed. It is guaranteed that code is executed before window.onload.
 	Init(js string)
-
-	// Eval evaluates arbitrary JavaScript code. Evaluation happens asynchronously,
-	// also the result of the expression is ignored. Use RPC bindings if you want
-	// to receive notifications about the results of the evaluation.
 	Eval(js string)
-
-	// Bind binds a callback function so that it will appear under the given name
-	// as a global JavaScript function. Internally it uses webview_init().
-	// Callback receives a request string and a user-provided argument pointer.
-	// Request string is a JSON array of all the arguments passed to the
-	// JavaScript function.
-	//
-	// f must be a function
-	// f must return either value and error or just error
 	Bind(name string, f interface{}) error
+
+	// 热键相关
+	RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandler) error
+	UnregisterHotKey(modifiers int, keyCode int)
+	RegisterHotKeyString(hotkey string, handler HotKeyHandler) error
+
+	// 窗口状态
+	SetFullscreen(enable bool)
+	SetAlwaysOnTop(enable bool)
+
+	// 新增方法
+	Minimize()                      // 最小化窗口
+	Maximize()                      // 最大化窗口
+	Restore()                       // 还原窗口
+	Center()                        // 居中窗口
+	SetOpacity(opacity float64)     // 设置窗口透明度 (0.0-1.0)
+
+	// 浏览器功能
+	Reload()                        // 刷新页面
+	Back()                          // 后退
+	Forward()                       // 前进
+	Stop()                         // 停止加载
+	ClearCache()                   // 清除缓存
+	ClearCookies()                // 清除 cookies
+
+	// 开发工具
+	OpenDevTools()                // 打开开发者工具
+	CloseDevTools()              // 关闭开发者工具
+
+	// 状态监听
+	OnLoadingStateChanged(func(isLoading bool))        // 加载状态变化
+	OnURLChanged(func(url string))                     // URL 变化
+	OnTitleChanged(func(title string))                // 标题变化
+	OnFullscreenChanged(func(isFullscreen bool))      // 全屏状态变化
+}
+
+// HotKey 表示一个热键组合
+type HotKey struct {
+	Modifiers int
+	KeyCode   int
+}
+
+// ParseHotKey 将热键字符串解析为 HotKey 结构
+// 例如: "Ctrl+Alt+Q" -> HotKey{MOD_CONTROL|MOD_ALT, 'Q'}
+func ParseHotKey(s string) (HotKey, error) {
+	parts := strings.Split(s, "+")
+	if len(parts) < 2 {
+		return HotKey{}, errors.New("invalid hotkey format")
+	}
+
+	var modifiers int
+	key := strings.ToUpper(parts[len(parts)-1])
+
+	// 解析修饰符
+	for _, mod := range parts[:len(parts)-1] {
+		switch strings.ToLower(strings.TrimSpace(mod)) {
+		case "ctrl":
+			modifiers |= w32.MOD_CONTROL
+		case "alt":
+			modifiers |= w32.MOD_ALT
+		case "shift":
+			modifiers |= w32.MOD_SHIFT
+		case "win":
+			modifiers |= w32.MOD_WIN
+		default:
+			return HotKey{}, fmt.Errorf("unknown modifier: %s", mod)
+		}
+	}
+
+	// 解析键码
+	var keyCode int
+	if len(key) == 1 {
+		// 字母和数字键
+		keyCode = int(key[0])
+	} else {
+		// 特殊键
+		switch key {
+		case "f1":
+			keyCode = w32.VK_F1
+		case "f2":
+			keyCode = w32.VK_F2
+		case "f3":
+			keyCode = w32.VK_F3
+		case "f4":
+			keyCode = w32.VK_F4
+		case "f5":
+			keyCode = w32.VK_F5
+		case "f6":
+			keyCode = w32.VK_F6
+		case "f7":
+			keyCode = w32.VK_F7
+		case "f8":
+			keyCode = w32.VK_F8
+		case "f9":
+			keyCode = w32.VK_F9
+		case "f10":
+			keyCode = w32.VK_F10
+		case "f11":
+			keyCode = w32.VK_F11
+		case "f12":
+			keyCode = w32.VK_F12
+		case "esc":
+			keyCode = w32.VK_ESCAPE
+		case "tab":
+			keyCode = w32.VK_TAB
+		case "space":
+			keyCode = w32.VK_SPACE
+		default:
+			return HotKey{}, fmt.Errorf("unknown key: %s", key)
+		}
+	}
+
+	return HotKey{Modifiers: modifiers, KeyCode: keyCode}, nil
 }

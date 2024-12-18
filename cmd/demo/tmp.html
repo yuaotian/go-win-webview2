@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        .float-buttons {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 20px;
+            border-radius: 50px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            z-index: 9999;
+        }
+        
+        .float-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        .float-btn:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="float-buttons">
+        <button class="float-btn" onclick="history.back()">上一页</button>
+        <button class="float-btn" onclick="location.href='/'">首页</button>
+        <button class="float-btn" onclick="location.reload()">刷新</button>
+    </div>
+</body>
+</html>

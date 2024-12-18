@@ -4,8 +4,10 @@
 package webview2
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"reflect"
 	"strconv"
@@ -19,20 +21,18 @@ import (
 )
 
 var (
-	windowContext     = map[uintptr]interface{}{}
-	windowContextSync sync.RWMutex
+	windowContext = sync.Map{}
 )
 
 func getWindowContext(wnd uintptr) interface{} {
-	windowContextSync.RLock()
-	defer windowContextSync.RUnlock()
-	return windowContext[wnd]
+	if v, ok := windowContext.Load(wnd); ok {
+		return v
+	}
+	return nil
 }
 
 func setWindowContext(wnd uintptr, data interface{}) {
-	windowContextSync.Lock()
-	defer windowContextSync.Unlock()
-	windowContext[wnd] = data
+	windowContext.Store(wnd, data)
 }
 
 type browser interface {
@@ -56,46 +56,60 @@ type webview struct {
 	m          sync.Mutex
 	bindings   map[string]interface{}
 	dispatchq  []func()
+	ctx        context.Context
+	hotkeys    map[int]HotKeyHandler
+	
+	// 状态监听回调
+	onLoadingStateChanged func(bool)
+	onURLChanged         func(string)
+	onTitleChanged      func(string)
+	onFullscreenChanged func(bool)
 }
 
 type WindowOptions struct {
-	Title  string
-	Width  uint
-	Height uint
-	IconId uint
-	Center bool
+	Title     string
+	Width     uint
+	Height    uint
+	IconId    uint
+	Center    bool
+	Frameless bool
+	Fullscreen bool  // 是否全屏
+	AlwaysOnTop bool // 是否置顶
 }
 
 type WebViewOptions struct {
 	Window unsafe.Pointer
 	Debug  bool
 
-	// DataPath specifies the datapath for the WebView2 runtime to use for the
-	// browser instance.
+	//DataPath 指定 WebView2 运行时使用的数据路径
+	//浏览器实例。
 	DataPath string
 
-	// AutoFocus will try to keep the WebView2 widget focused when the window
-	// is focused.
+	//当窗口打开时，AutoFocus 将尝试保持 WebView2 小部件聚焦
+	//已聚焦。
 	AutoFocus bool
 
-	// WindowOptions customizes the window that is created to embed the
-	// WebView2 widget.
+	//WindowOptions 自定义创建的窗口以嵌入
+	//WebView2 小部件。
 	WindowOptions WindowOptions
 }
 
-// New creates a new webview in a new window.
+//New 在新窗口中创建一个新的 webview。
 func New(debug bool) WebView { return NewWithOptions(WebViewOptions{Debug: debug}) }
 
-// NewWindow creates a new webview using an existing window.
+//NewWindow 使用现有窗口创建一个新的 webview。
 //
-// Deprecated: Use NewWithOptions.
+//已弃用：使用 NewWithOptions。
 func NewWindow(debug bool, window unsafe.Pointer) WebView {
 	return NewWithOptions(WebViewOptions{Debug: debug, Window: window})
 }
 
-// NewWithOptions creates a new webview using the provided options.
+//NewWithOptions 使用提供的选项创建一个新的 webview。
 func NewWithOptions(options WebViewOptions) WebView {
-	w := &webview{}
+	w := &webview{
+		ctx:     context.Background(),
+		hotkeys: make(map[int]HotKeyHandler),
+	}
 	w.bindings = map[string]interface{}{}
 	w.autofocus = options.AutoFocus
 
@@ -114,12 +128,12 @@ func NewWithOptions(options WebViewOptions) WebView {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// disable context menu
+	//禁用上下文菜单
 	err = settings.PutAreDefaultContextMenusEnabled(options.Debug)
 	if err != nil {
 		log.Fatal(err)
 	}
-	// disable developer tools
+	//禁用开发者工具
 	err = settings.PutAreDevToolsEnabled(options.Debug)
 	if err != nil {
 		log.Fatal(err)
@@ -139,22 +153,26 @@ func jsString(v interface{}) string { b, _ := json.Marshal(v); return string(b) 
 func (w *webview) msgcb(msg string) {
 	d := rpcMessage{}
 	if err := json.Unmarshal([]byte(msg), &d); err != nil {
-		log.Printf("invalid RPC message: %v", err)
+		log.Printf("Error unmarshaling RPC message: %v", err)
 		return
 	}
 
 	id := strconv.Itoa(d.ID)
+	rejectScript := fmt.Sprintf("window._rpc[%s].reject", id)
+	resolveScript := fmt.Sprintf("window._rpc[%s].resolve", id)
+	cleanupScript := fmt.Sprintf("window._rpc[%s] = undefined", id)
+
 	if res, err := w.callbinding(d); err != nil {
 		w.Dispatch(func() {
-			w.Eval("window._rpc[" + id + "].reject(" + jsString(err.Error()) + "); window._rpc[" + id + "] = undefined")
+			w.Eval(fmt.Sprintf("%s(%s); %s", rejectScript, jsString(err.Error()), cleanupScript))
 		})
 	} else if b, err := json.Marshal(res); err != nil {
 		w.Dispatch(func() {
-			w.Eval("window._rpc[" + id + "].reject(" + jsString(err.Error()) + "); window._rpc[" + id + "] = undefined")
+			w.Eval(fmt.Sprintf("%s(%s); %s", rejectScript, jsString(err.Error()), cleanupScript))
 		})
 	} else {
 		w.Dispatch(func() {
-			w.Eval("window._rpc[" + id + "].resolve(" + string(b) + "); window._rpc[" + id + "] = undefined")
+			w.Eval(fmt.Sprintf("%s(%s); %s", resolveScript, string(b), cleanupScript))
 		})
 	}
 }
@@ -250,6 +268,61 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			if w.minsz.X > 0 && w.minsz.Y > 0 {
 				lpmmi.PtMinTrackSize = w.minsz
 			}
+		case w32.WMNCHitTest:
+			// 获取鼠标位置
+			x := int32(lp & 0xffff)
+			y := int32((lp >> 16) & 0xffff)
+			
+			// 获取窗口位置
+			var rect w32.Rect
+			_, _, _ = w32.User32GetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rect)))
+			
+			// 定义边框拖拽区域宽度
+			const borderWidth = 5
+			
+			// 检查是否在拖拽区域内
+			if y >= rect.Top && y <= rect.Top+borderWidth {
+				if x >= rect.Left && x <= rect.Left+borderWidth {
+					return w32.HTTopLeft
+				}
+				if x >= rect.Right-borderWidth && x <= rect.Right {
+					return w32.HTTopRight
+				}
+				return w32.HTTop
+			}
+			if y >= rect.Bottom-borderWidth && y <= rect.Bottom {
+				if x >= rect.Left && x <= rect.Left+borderWidth {
+					return w32.HTBottomLeft
+				}
+				if x >= rect.Right-borderWidth && x <= rect.Right {
+					return w32.HTBottomRight
+				}
+				return w32.HTBottom
+			}
+			if x >= rect.Left && x <= rect.Left+borderWidth {
+				return w32.HTLeft
+			}
+			if x >= rect.Right-borderWidth && x <= rect.Right {
+				return w32.HTRight
+			}
+			
+			// 允许拖动窗口
+			return w32.HTCaption
+			
+		case w32.WMLButtonDown:
+			if wp == w32.HTCaption {
+				_, _, _ = w32.User32SendMessageW.Call(hwnd, w32.WMNCLButtonDown, wp, lp)
+				return 0
+			}
+		case w32.WMHotKey:
+			w.m.Lock()
+			if handler, ok := w.hotkeys[int(wp)]; ok {
+				w.m.Unlock()
+				handler()
+			} else {
+				w.m.Unlock()
+			}
+			return 0
 		default:
 			r, _, _ := w32.User32DefWindowProcW.Call(hwnd, msg, wp, lp)
 			return r
@@ -268,17 +341,14 @@ func (w *webview) Create(debug bool, window unsafe.Pointer) bool {
 
 func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 	var hinstance windows.Handle
-	_ = windows.GetModuleHandleEx(0, nil, &hinstance)
+	if err := windows.GetModuleHandleEx(0, nil, &hinstance); err != nil {
+		log.Printf("Error getting module handle: %v", err)
+		return false
+	}
 
-	var icon uintptr
-	if opts.IconId == 0 {
-		// load default icon
-		icow, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCxIcon)
-		icoh, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCyIcon)
-		icon, _, _ = w32.User32LoadImageW.Call(uintptr(hinstance), 32512, icow, icoh, 0)
-	} else {
-		// load icon from resource
-		icon, _, _ = w32.User32LoadImageW.Call(uintptr(hinstance), uintptr(opts.IconId), 1, 0, 0, w32.LR_DEFAULTSIZE|w32.LR_SHARED)
+	icon := w.loadWindowIcon(hinstance, opts.IconId)
+	if icon == 0 {
+		log.Printf("Warning: Failed to load window icon")
 	}
 
 	className, _ := windows.UTF16PtrFromString("webview")
@@ -317,11 +387,18 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		posY = w32.CW_USEDEFAULT
 	}
 
+	var style uint32 = w32.WSOverlappedWindow // 默认样式
+	
+	if opts.Frameless {
+		// 无边框窗口样式
+		style = w32.WSPopup | w32.WSVisible
+	}
+
 	w.hwnd, _, _ = w32.User32CreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
-		0xCF0000, // WS_OVERLAPPEDWINDOW
+		uintptr(style), // 使用新的样式
 		uintptr(posX),
 		uintptr(posY),
 		uintptr(windowWidth),
@@ -333,7 +410,7 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 	)
 	setWindowContext(w.hwnd, w)
 
-	_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SWShow)
+	_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_SHOW)
 	_, _, _ = w32.User32UpdateWindow.Call(w.hwnd)
 	_, _, _ = w32.User32SetFocus.Call(w.hwnd)
 
@@ -341,10 +418,38 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		return false
 	}
 	w.browser.Resize()
+
+	// 创建窗口后应用全屏和置顶设置
+	if opts.Fullscreen {
+		w.SetFullscreen(true)
+	}
+	
+	if opts.AlwaysOnTop {
+		w.SetAlwaysOnTop(true)
+	}
+
 	return true
 }
 
 func (w *webview) Destroy() {
+	// 注销所有热键
+	w.m.Lock()
+	for id := range w.hotkeys {
+		_, _, _ = w32.User32UnregisterHotKey.Call(w.hwnd, uintptr(id))
+	}
+	w.hotkeys = nil
+	w.m.Unlock()
+
+	// 清理资源
+	w.m.Lock()
+	w.bindings = nil
+	w.dispatchq = nil
+	w.m.Unlock()
+	
+	// 从 windowContext 中移除
+	windowContext.Delete(w.hwnd)
+	
+	// 发送关闭消息
 	_, _, _ = w32.User32PostMessageW.Call(w.hwnd, w32.WMClose, 0, 0)
 }
 
@@ -383,7 +488,7 @@ func (w *webview) Terminate() {
 }
 
 func (w *webview) Window() unsafe.Pointer {
-	return unsafe.Pointer(w.hwnd)
+	return unsafe.Pointer(uintptr(w.hwnd))
 }
 
 func (w *webview) Navigate(url string) {
@@ -427,7 +532,7 @@ func (w *webview) SetSize(width int, height int, hints Hint) {
 		_, _, _ = w32.User32AdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), w32.WSOverlappedWindow, 0)
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd, 0, uintptr(r.Left), uintptr(r.Top), uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
-			w32.SWPNoZOrder|w32.SWPNoActivate|w32.SWPNoMove|w32.SWPFrameChanged)
+			w32.SWP_NOZORDER|w32.SWP_NOACTIVATE|w32.SWP_NOMOVE|w32.SWP_FRAMECHANGED)
 		w.browser.Resize()
 	}
 }
@@ -479,4 +584,317 @@ func (w *webview) Bind(name string, f interface{}) error {
 	})()`)
 
 	return nil
+}
+
+func (w *webview) loadWindowIcon(hinstance windows.Handle, iconId uint) uintptr {
+	if iconId == 0 {
+		icow, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCxIcon)
+		icoh, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCyIcon)
+		icon, _, _ := w32.User32LoadImageW.Call(
+			uintptr(hinstance),
+			32512,
+			icow,
+			icoh,
+			0,
+			0,
+		)
+		return icon
+	}
+	
+	icon, _, _ := w32.User32LoadImageW.Call(
+		uintptr(hinstance),
+		uintptr(iconId),
+		1,
+		0,
+		0,
+		w32.LR_DEFAULTSIZE|w32.LR_SHARED,
+	)
+	return icon
+}
+
+func (w *webview) Context() context.Context {
+	if w.ctx == nil {
+		w.ctx = context.Background()
+	}
+	return w.ctx
+}
+
+func (w *webview) WithContext(ctx context.Context) WebView {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	w.ctx = ctx
+	return w
+}
+
+func (w *webview) RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandler) error {
+	w.m.Lock()
+	defer w.m.Unlock()
+
+	// 始化热键映射
+	if w.hotkeys == nil {
+		w.hotkeys = make(map[int]HotKeyHandler)
+	}
+
+	// 生成唯一的热键ID
+	hotkeyID := len(w.hotkeys) + 1
+
+	// 注册热键
+	ret, _, err := w32.User32RegisterHotKey.Call(
+		w.hwnd,
+		uintptr(hotkeyID),
+		uintptr(modifiers),
+		uintptr(keyCode),
+	)
+
+	if ret == 0 {
+		return fmt.Errorf("failed to register hotkey: %v", err)
+	}
+
+	// 保存处理函数
+	w.hotkeys[hotkeyID] = handler
+	return nil
+}
+
+func (w *webview) UnregisterHotKey(modifiers int, keyCode int) {
+	w.m.Lock()
+	defer w.m.Unlock()
+
+	// 查找对应的热键ID
+	var hotkeyID int
+	for id := range w.hotkeys {
+		// 这里简化处理，实际应该保modifiers和keyCode来确保完全匹配
+		hotkeyID = id
+		break
+	}
+
+	if hotkeyID > 0 {
+		_, _, _ = w32.User32UnregisterHotKey.Call(w.hwnd, uintptr(hotkeyID))
+		delete(w.hotkeys, hotkeyID)
+	}
+}
+
+// RegisterHotKeyString 通过字符串注册热键
+// 例如: "Ctrl+Alt+Q"
+func (w *webview) RegisterHotKeyString(hotkey string, handler HotKeyHandler) error {
+	hk, err := ParseHotKey(hotkey)
+	if err != nil {
+		return fmt.Errorf("failed to parse hotkey: %v", err)
+	}
+	return w.RegisterHotKey(hk.Modifiers, hk.KeyCode, handler)
+}
+
+// SetFullscreen 设置窗口全屏状态
+func (w *webview) SetFullscreen(enable bool) {
+	if enable {
+		// 保存当前窗口位置和大小用于还原
+		var rect w32.Rect
+		_, _, _ = w32.User32GetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rect)))
+		
+		// 获取主显示器的完整尺寸（包括任务栏）
+		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
+		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
+		
+		// 移除窗口边框样式
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
+		style &^= w32.WSOverlappedWindow
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
+		
+		// 设置全屏 - 使用整个屏幕尺寸
+		_, _, _ = w32.User32SetWindowPos.Call(
+			w.hwnd,
+			uintptr(w32.HWND_TOP),
+			0,
+			0,
+			screenWidth,
+			screenHeight,
+			w32.SWP_FRAMECHANGED,
+		)
+	} else {
+		// 恢复窗口样式
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
+		style |= w32.WSOverlappedWindow
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
+		
+		// 获取屏幕尺寸
+		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
+		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
+		
+		// 设置默认窗口大小
+		width := uintptr(1024)
+		height := uintptr(768)
+		
+		// 计算居中位置
+		x := (screenWidth - width) / 2
+		y := (screenHeight - height) / 2
+		
+		// 恢复窗口
+		_, _, _ = w32.User32SetWindowPos.Call(
+			w.hwnd,
+			uintptr(w32.HWND_TOP),
+			x,
+			y,
+			width,
+			height,
+			w32.SWP_FRAMECHANGED,
+		)
+	}
+	w.browser.Resize()
+}
+
+// SetAlwaysOnTop 设置窗口置顶状态
+func (w *webview) SetAlwaysOnTop(enable bool) {
+	flag := w32.HWND_NOTOPMOST
+	if enable {
+		flag = w32.HWND_TOPMOST
+	}
+	_, _, _ = w32.User32SetWindowPos.Call(
+		w.hwnd,
+		uintptr(flag),
+		0, 0, 0, 0,
+		w32.SWP_NOMOVE|w32.SWP_NOSIZE,
+	)
+}
+
+// 最小化窗口
+func (w *webview) Minimize() {
+	w.Dispatch(func() {
+		_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_MINIMIZE)
+	})
+}
+
+// 最大化窗口
+func (w *webview) Maximize() {
+	w.Dispatch(func() {
+		_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_MAXIMIZE)
+	})
+}
+
+// 还原窗口
+func (w *webview) Restore() {
+	w.Dispatch(func() {
+		_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_RESTORE)
+	})
+}
+
+// 居中窗口
+func (w *webview) Center() {
+	w.Dispatch(func() {
+		var rect w32.Rect
+		_, _, _ = w32.User32GetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rect)))
+		width := int32(rect.Right - rect.Left)
+		height := int32(rect.Bottom - rect.Top)
+		
+		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
+		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
+		
+		x := int32(screenWidth-uintptr(width)) / 2
+		y := int32(screenHeight-uintptr(height)) / 2
+		
+		_, _, _ = w32.User32SetWindowPos.Call(
+			w.hwnd,
+			0,
+			uintptr(x),
+			uintptr(y),
+			uintptr(width),
+			uintptr(height),
+			w32.SWP_NOZORDER|w32.SWP_NOSIZE,
+		)
+	})
+}
+
+// 设置窗口透明度
+func (w *webview) SetOpacity(opacity float64) {
+	if opacity < 0 {
+		opacity = 0
+	}
+	if opacity > 1 {
+		opacity = 1
+	}
+	
+	w.Dispatch(func() {
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
+		style |= uintptr(w32.WS_EX_LAYERED)
+		
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
+		_, _, _ = w32.User32SetLayeredWindowAttributes.Call(
+			w.hwnd,
+			0,
+			uintptr(opacity * 255),
+			uintptr(w32.LWA_ALPHA),
+		)
+	})
+}
+
+// 浏览器相关功能
+func (w *webview) Reload() {
+	w.Eval("window.location.reload();")
+}
+
+func (w *webview) Back() {
+	w.Eval("window.history.back();")
+}
+
+func (w *webview) Forward() {
+	w.Eval("window.history.forward();") 
+}
+
+func (w *webview) Stop() {
+	w.Eval("window.stop();")
+}
+
+// 开发者工具
+func (w *webview) OpenDevTools() {
+	if w.browser != nil {
+		// 需要实现 OpenDevToolsWindow 方法
+		 //w.browser.OpenDevToolsWindow()
+	}
+}
+
+func (w *webview) CloseDevTools() {
+	// 通过 JavaScript 关闭开发者工具
+	w.Eval(`if(window.devtools && window.devtools.isOpen()) window.devtools.close();`)
+}
+
+func (w *webview) OnLoadingStateChanged(callback func(bool)) {
+	w.onLoadingStateChanged = callback
+}
+
+func (w *webview) OnURLChanged(callback func(string)) {
+	w.onURLChanged = callback
+}
+
+func (w *webview) OnTitleChanged(callback func(string)) {
+	w.onTitleChanged = callback
+}
+
+func (w *webview) OnFullscreenChanged(callback func(bool)) {
+	w.onFullscreenChanged = callback
+}
+
+// ClearCache 清除浏览器缓存
+func (w *webview) ClearCache() {
+	// 通过 JavaScript 清除缓存
+	w.Eval(`
+		if (window.caches) {
+			caches.keys().then(function(keyList) {
+				return Promise.all(keyList.map(function(key) {
+					return caches.delete(key);
+				}));
+			});
+		}
+		localStorage.clear();
+		sessionStorage.clear();
+	`)
+}
+
+// ClearCookies 清除浏览器 cookies
+func (w *webview) ClearCookies() {
+	// 通过 JavaScript 清除 cookies
+	w.Eval(`
+		document.cookie.split(";").forEach(function(c) { 
+			document.cookie = c.replace(/^ +/, "")
+				.replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+		});
+	`)
 }

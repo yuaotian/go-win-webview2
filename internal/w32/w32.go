@@ -1,7 +1,9 @@
+//go:build windows
+// +build windows
+
 package w32
 
 import (
-	"syscall"
 	"unicode/utf16"
 	"unsafe"
 
@@ -42,6 +44,12 @@ var (
 	User32SetWindowPos       = user32.NewProc("SetWindowPos")
 	User32IsDialogMessage    = user32.NewProc("IsDialogMessage")
 	User32GetAncestor        = user32.NewProc("GetAncestor")
+	User32GetWindowRect      = user32.NewProc("GetWindowRect")
+	User32SendMessageW       = user32.NewProc("SendMessageW")
+	User32RegisterHotKey   = user32.NewProc("RegisterHotKey")
+	User32UnregisterHotKey = user32.NewProc("UnregisterHotKey")
+	User32SystemParametersInfoW = user32.NewProc("SystemParametersInfoW")
+	User32SetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 )
 
 const (
@@ -71,14 +79,23 @@ const (
 )
 
 const (
-	SWShow = 5
+	SW_SHOW     = 5
+	SW_MINIMIZE = 6
+	SW_MAXIMIZE = 3
+	SW_RESTORE  = 9
 )
 
 const (
-	SWPNoZOrder     = 0x0004
-	SWPNoActivate   = 0x0010
-	SWPNoMove       = 0x0002
-	SWPFrameChanged = 0x0020
+	HWND_TOP       = 0
+	HWND_TOPMOST   = -1
+	HWND_NOTOPMOST = -2
+
+	SWP_NOMOVE       = 0x0002
+	SWP_NOSIZE       = 0x0001
+	SWP_SHOWWINDOW   = 0x0040
+	SWP_NOZORDER     = 0x0004
+	SWP_NOACTIVATE   = 0x0010
+	SWP_FRAMECHANGED = 0x0020
 )
 
 const (
@@ -101,7 +118,7 @@ const (
 )
 
 const (
-	GWLStyle = -16
+	GWLStyle = ^(16 - 1)
 )
 
 const (
@@ -118,6 +135,68 @@ const (
 	WAInactive    = 0
 	WAActive      = 1
 	WAActiveClick = 2
+)
+
+const (
+	WSPopup   = 0x80000000
+	WSVisible = 0x10000000
+)
+
+const (
+	HTCaption     = 2
+	HTLeft        = 10
+	HTRight       = 11
+	HTTop         = 12
+	HTTopLeft     = 13
+	HTTopRight    = 14
+	HTBottom      = 15
+	HTBottomLeft  = 16
+	HTBottomRight = 17
+)
+
+const (
+	WMLButtonDown = 0x0201
+	WMNCHitTest   = 0x0084
+)
+
+const (
+	// Modifiers
+	MOD_ALT      = 0x0001
+	MOD_CONTROL  = 0x0002
+	MOD_SHIFT    = 0x0004
+	MOD_WIN      = 0x0008
+	MOD_NOREPEAT = 0x4000
+
+	// Messages
+	WMHotKey = 0x0312
+)
+
+const (
+	VK_ESCAPE = 0x1B
+	VK_SPACE  = 0x20
+	VK_TAB    = 0x09
+	VK_F1     = 0x70
+	VK_F2     = 0x71
+	VK_F3     = 0x72
+	VK_F4     = 0x73
+	VK_F5     = 0x74
+	VK_F6     = 0x75
+	VK_F7     = 0x76
+	VK_F8     = 0x77
+	VK_F9     = 0x78
+	VK_F10    = 0x79
+	VK_F11    = 0x7A
+	VK_F12    = 0x7B
+)
+
+const (
+	SPI_GETWORKAREA = 0x0030
+)
+
+const (
+	GWL_EXSTYLE = -20
+	WS_EX_LAYERED = 0x00080000
+	LWA_ALPHA = 0x00000002
 )
 
 type WndClassExW struct {
@@ -155,7 +234,7 @@ type Point struct {
 }
 
 type Msg struct {
-	Hwnd     syscall.Handle
+	Hwnd     windows.Handle
 	Message  uint32
 	WParam   uintptr
 	LParam   uintptr

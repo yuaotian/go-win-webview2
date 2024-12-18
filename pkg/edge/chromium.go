@@ -344,8 +344,8 @@ func (e *Chromium) NavigationCompleted(sender *ICoreWebView2, args *ICoreWebView
 }
 
 func (e *Chromium) NotifyParentWindowPositionChanged() error {
-	//It looks like the wndproc function is called before the controller initialization is complete.
-	//Because of this the controller is nil
+	//看起来控制器初始化完成之前就调用了wndproc函数。
+	//因此控制器为零
 	if e.controller == nil {
 		return nil
 	}
