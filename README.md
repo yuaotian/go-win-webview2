@@ -87,13 +87,7 @@
   - 动态注册/注销
 
 
-<p align="center">
-  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/js-hook-1.png?raw=true" alt="JS Hook Demo" width="600">
 
-  <br>
-  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/js-hook-2.gif?raw=true" alt="JS Hook Architecture" width="600">
-  <em>JS Hook 运行演示</em>
-</p>
 
 ## 📦 安装
 
@@ -137,6 +131,15 @@ func main() {
 ```
 
 ### 高级功能示例
+
+<p align="center">
+  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/js-hook-1.png?raw=true" alt="JS Hook Demo" width="600">
+  <br>
+  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/js-hook-2.gif?raw=true" alt="JS Hook Architecture" width="600">
+  <br>
+  <em>JS Hook 运行演示</em>
+</p>
+
 ```go
 package main
 
@@ -218,6 +221,7 @@ w.Eval(`
     }));
 `)
 ```
+
 
 ### 事件监听示例
 ```go
@@ -324,6 +328,11 @@ w.Eval(`
 ```
 
 ### 窗口样式定制示例
+<p align="center">
+  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/window.gif?raw=true" alt="JS Hook Architecture" width="600">
+  <br>
+  <em>自定义窗口样式示例</em>
+</p>
 
 #### 基础窗口配置
 ```go
