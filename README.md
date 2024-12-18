@@ -1,5 +1,7 @@
 # 🚀 go-win-webview2
 
+> ⚠️ **系统要求**: 本项目仅支持 Windows 操作系统
+
 <p align="center">
   <img src="assets/logo.svg" alt="WebView2 Logo" width="200" height="200">
 </p>
@@ -501,7 +503,7 @@ func bindWindowControls(w webview2.WebView, state *WindowState) {
 
         state.isMaximized = !state.isMaximized
         if state.isMaximized {
-            // 保存当前窗口位置和大小
+            // 保存当前窗口位置和大���
             var rect w32.Rect
             w32.GetWindowRect(w32.Handle(w.Window()), &rect)
             state.lastX = int(rect.Left)
@@ -861,7 +863,7 @@ w.Init(`
         startPolling();
     }
     
-    // 存储API检测
+    // 存���API检测
     const storage = window.localStorage || {
         _data: {},
         setItem(id, val) { this._data[id] = val; },
