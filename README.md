@@ -32,7 +32,7 @@
 
 ## ✨ 特性
 
-- 🎯 完全兼容webview/webview的API
+- 🎯 完全兼容Webview2的API
 - 💪 专注于Windows平台WebView2的增强功能
 - 🔌 简单易用的Go语言接口
 - 🛡️ 稳定可靠的性能表现
