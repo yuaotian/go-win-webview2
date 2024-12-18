@@ -14,8 +14,8 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/jchv/go-webview2/internal/w32"
-	"github.com/jchv/go-webview2/pkg/edge"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
+	"github.com/yuaotian/go-win-webview2/pkg/edge"
 
 	"golang.org/x/sys/windows"
 )
@@ -58,22 +58,22 @@ type webview struct {
 	dispatchq  []func()
 	ctx        context.Context
 	hotkeys    map[int]HotKeyHandler
-	
+
 	// 状态监听回调
 	onLoadingStateChanged func(bool)
-	onURLChanged         func(string)
-	onTitleChanged      func(string)
-	onFullscreenChanged func(bool)
+	onURLChanged          func(string)
+	onTitleChanged        func(string)
+	onFullscreenChanged   func(bool)
 }
 
 type WindowOptions struct {
-	Title     string
-	Width     uint
-	Height    uint
-	IconId    uint
-	Center    bool
-	Frameless bool
-	Fullscreen bool  // 是否全屏
+	Title       string
+	Width       uint
+	Height      uint
+	IconId      uint
+	Center      bool
+	Frameless   bool
+	Fullscreen  bool // 是否全屏
 	AlwaysOnTop bool // 是否置顶
 }
 
@@ -94,17 +94,17 @@ type WebViewOptions struct {
 	WindowOptions WindowOptions
 }
 
-//New 在新窗口中创建一个新的 webview。
+// New 在新窗口中创建一个新的 webview。
 func New(debug bool) WebView { return NewWithOptions(WebViewOptions{Debug: debug}) }
 
-//NewWindow 使用现有窗口创建一个新的 webview。
+// NewWindow 使用现有窗口创建一个新的 webview。
 //
-//已弃用：使用 NewWithOptions。
+// 已弃用：使用 NewWithOptions。
 func NewWindow(debug bool, window unsafe.Pointer) WebView {
 	return NewWithOptions(WebViewOptions{Debug: debug, Window: window})
 }
 
-//NewWithOptions 使用提供的选项创建一个新的 webview。
+// NewWithOptions 使用提供的选项创建一个新的 webview。
 func NewWithOptions(options WebViewOptions) WebView {
 	w := &webview{
 		ctx:     context.Background(),
@@ -272,14 +272,14 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			// 获取鼠标位置
 			x := int32(lp & 0xffff)
 			y := int32((lp >> 16) & 0xffff)
-			
+
 			// 获取窗口位置
 			var rect w32.Rect
 			_, _, _ = w32.User32GetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rect)))
-			
+
 			// 定义边框拖拽区域宽度
 			const borderWidth = 5
-			
+
 			// 检查是否在拖拽区域内
 			if y >= rect.Top && y <= rect.Top+borderWidth {
 				if x >= rect.Left && x <= rect.Left+borderWidth {
@@ -305,10 +305,10 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			if x >= rect.Right-borderWidth && x <= rect.Right {
 				return w32.HTRight
 			}
-			
+
 			// 允许拖动窗口
 			return w32.HTCaption
-			
+
 		case w32.WMLButtonDown:
 			if wp == w32.HTCaption {
 				_, _, _ = w32.User32SendMessageW.Call(hwnd, w32.WMNCLButtonDown, wp, lp)
@@ -388,7 +388,7 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 	}
 
 	var style uint32 = w32.WSOverlappedWindow // 默认样式
-	
+
 	if opts.Frameless {
 		// 无边框窗口样式
 		style = w32.WSPopup | w32.WSVisible
@@ -423,7 +423,7 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 	if opts.Fullscreen {
 		w.SetFullscreen(true)
 	}
-	
+
 	if opts.AlwaysOnTop {
 		w.SetAlwaysOnTop(true)
 	}
@@ -445,10 +445,10 @@ func (w *webview) Destroy() {
 	w.bindings = nil
 	w.dispatchq = nil
 	w.m.Unlock()
-	
+
 	// 从 windowContext 中移除
 	windowContext.Delete(w.hwnd)
-	
+
 	// 发送关闭消息
 	_, _, _ = w32.User32PostMessageW.Call(w.hwnd, w32.WMClose, 0, 0)
 }
@@ -600,7 +600,7 @@ func (w *webview) loadWindowIcon(hinstance windows.Handle, iconId uint) uintptr 
 		)
 		return icon
 	}
-	
+
 	icon, _, _ := w32.User32LoadImageW.Call(
 		uintptr(hinstance),
 		uintptr(iconId),
@@ -631,7 +631,7 @@ func (w *webview) RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandl
 	w.m.Lock()
 	defer w.m.Unlock()
 
-	// 始化热键映射
+	// ���化热键映射
 	if w.hotkeys == nil {
 		w.hotkeys = make(map[int]HotKeyHandler)
 	}
@@ -690,16 +690,16 @@ func (w *webview) SetFullscreen(enable bool) {
 		// 保存当前窗口位置和大小用于还原
 		var rect w32.Rect
 		_, _, _ = w32.User32GetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rect)))
-		
+
 		// 获取主显示器的完整尺寸（包括任务栏）
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
 		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
-		
+
 		// 移除窗口边框样式
 		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
 		style &^= w32.WSOverlappedWindow
 		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
-		
+
 		// 设置全屏 - 使用整个屏幕尺寸
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd,
@@ -715,19 +715,19 @@ func (w *webview) SetFullscreen(enable bool) {
 		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
 		style |= w32.WSOverlappedWindow
 		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
-		
+
 		// 获取屏幕尺寸
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
 		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
-		
+
 		// 设置默认窗口大小
 		width := uintptr(1024)
 		height := uintptr(768)
-		
+
 		// 计算居中位置
 		x := (screenWidth - width) / 2
 		y := (screenHeight - height) / 2
-		
+
 		// 恢复窗口
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd,
@@ -784,13 +784,13 @@ func (w *webview) Center() {
 		_, _, _ = w32.User32GetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rect)))
 		width := int32(rect.Right - rect.Left)
 		height := int32(rect.Bottom - rect.Top)
-		
+
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
 		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
-		
+
 		x := int32(screenWidth-uintptr(width)) / 2
 		y := int32(screenHeight-uintptr(height)) / 2
-		
+
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd,
 			0,
@@ -811,16 +811,16 @@ func (w *webview) SetOpacity(opacity float64) {
 	if opacity > 1 {
 		opacity = 1
 	}
-	
+
 	w.Dispatch(func() {
 		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))
 		style |= uintptr(w32.WS_EX_LAYERED)
-		
+
 		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
 		_, _, _ = w32.User32SetLayeredWindowAttributes.Call(
 			w.hwnd,
 			0,
-			uintptr(opacity * 255),
+			uintptr(opacity*255),
 			uintptr(w32.LWA_ALPHA),
 		)
 	})
@@ -836,7 +836,7 @@ func (w *webview) Back() {
 }
 
 func (w *webview) Forward() {
-	w.Eval("window.history.forward();") 
+	w.Eval("window.history.forward();")
 }
 
 func (w *webview) Stop() {
@@ -847,7 +847,7 @@ func (w *webview) Stop() {
 func (w *webview) OpenDevTools() {
 	if w.browser != nil {
 		// 需要实现 OpenDevToolsWindow 方法
-		 //w.browser.OpenDevToolsWindow()
+		//w.browser.OpenDevToolsWindow()
 	}
 }
 
@@ -897,4 +897,15 @@ func (w *webview) ClearCookies() {
 				.replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
 		});
 	`)
+}
+
+// DispatchAsync 异步分发任务到主线程
+func (w *webview) DispatchAsync(f func()) {
+	// 使用 channel 来实现异步分发
+	go func() {
+		w.m.Lock()
+		w.dispatchq = append(w.dispatchq, f)
+		w.m.Unlock()
+		_, _, _ = w32.User32PostThreadMessageW.Call(w.mainthread, w32.WMApp, 0, 0)
+	}()
 }

@@ -1,3 +1,5 @@
+//go:build windows
+// +build windows
 package webview2
 
 import (
@@ -7,13 +9,13 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/jchv/go-webview2/internal/w32"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 )
 
 // 错误定义
 var (
-	ErrInvalidFunction  = errors.New("only functions can be bound")
-	ErrTooManyReturns   = errors.New("function may only return a value or a value+error") 
+	ErrInvalidFunction   = errors.New("only functions can be bound")
+	ErrTooManyReturns    = errors.New("function may only return a value or a value+error")
 	ErrInvalidReturnType = errors.New("second return value must be an error")
 )
 
@@ -21,7 +23,7 @@ var (
 // HotKeyHandler 是热键处理函数的类型
 type HotKeyHandler func()
 
-//提示用于配置窗口大小和调整大小行为。
+// 提示用于配置窗口大小和调整大小行为。
 type Hint int
 
 const (
@@ -38,7 +40,7 @@ const (
 	HintMax
 )
 
-//WebView是webview的接口。
+// WebView是webview的接口。
 type WebView interface {
 	// 上下文管理相关方法
 	Context() context.Context
@@ -47,7 +49,10 @@ type WebView interface {
 	// 窗口控制
 	Run()
 	Terminate()
+	// 调度函数
 	Dispatch(f func())
+	// 调度函数
+	DispatchAsync(f func())
 	Destroy()
 	Window() unsafe.Pointer
 	SetTitle(title string)
@@ -68,29 +73,29 @@ type WebView interface {
 	SetAlwaysOnTop(enable bool)
 
 	// 新增方法
-	Minimize()                      // 最小化窗口
-	Maximize()                      // 最大化窗口
-	Restore()                       // 还原窗口
-	Center()                        // 居中窗口
-	SetOpacity(opacity float64)     // 设置窗口透明度 (0.0-1.0)
+	Minimize()                  // 最小化窗口
+	Maximize()                  // 最大化窗口
+	Restore()                   // 还原窗口
+	Center()                    // 居中窗口
+	SetOpacity(opacity float64) // 设置窗口透明度 (0.0-1.0)
 
 	// 浏览器功能
-	Reload()                        // 刷新页面
-	Back()                          // 后退
-	Forward()                       // 前进
-	Stop()                         // 停止加载
-	ClearCache()                   // 清除缓存
-	ClearCookies()                // 清除 cookies
+	Reload()       // 刷新页面
+	Back()         // 后退
+	Forward()      // 前进
+	Stop()         // 停止加载
+	ClearCache()   // 清除缓存
+	ClearCookies() // 清除 cookies
 
 	// 开发工具
-	OpenDevTools()                // 打开开发者工具
-	CloseDevTools()              // 关闭开发者工具
+	OpenDevTools()  // 打开开发者工具
+	CloseDevTools() // 关闭开发者工具
 
 	// 状态监听
-	OnLoadingStateChanged(func(isLoading bool))        // 加载状态变化
-	OnURLChanged(func(url string))                     // URL 变化
-	OnTitleChanged(func(title string))                // 标题变化
-	OnFullscreenChanged(func(isFullscreen bool))      // 全屏状态变化
+	OnLoadingStateChanged(func(isLoading bool))  // 加载状态变化
+	OnURLChanged(func(url string))               // URL 变化
+	OnTitleChanged(func(title string))           // 标题变化
+	OnFullscreenChanged(func(isFullscreen bool)) // 全屏状态变化
 }
 
 // HotKey 表示一个热键组合

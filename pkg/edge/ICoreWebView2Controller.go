@@ -1,9 +1,12 @@
+//go:build windows
+// +build windows
+
 package edge
 
 import (
 	"unsafe"
 
-	"github.com/jchv/go-webview2/internal/w32"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"golang.org/x/sys/windows"
 )
 
