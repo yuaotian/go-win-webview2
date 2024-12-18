@@ -190,7 +190,7 @@ func main() {
 }
 ```
 
-### WebSocket��信示例
+### WebSocket通信示例
 ```go
 // 设置WebSocket消息处理器
 w.OnWebSocketMessage(func(message string) {
@@ -246,7 +246,7 @@ w.RegisterHotKeyString("Ctrl+Q", func() {
 
 // 注册功能热键
 w.RegisterHotKeyString("F11", func() {
-    log.Println("切换全���...")
+    log.Println("切换全屏...")
     // 在这里保存当前状态
     isFullscreen := false // 实际应用中需要跟踪此状态
     isFullscreen = !isFullscreen
