@@ -1,0 +1,23 @@
+# 忽略 node_modules 文件夹
+node_modules/
+
+# 忽略 build 输出目录
+build/
+dist/
+
+# 忽略所有 .log 文件所在的文件夹
+logs/
+
+# 忽略所有 temp 文件夹，无论在哪个目录下
+**/temp/
+
+# 忽略特定路径的文件夹
+project/debug/
+src/cache/
+
+# 忽略以 .开头的隐藏文件夹
+.*/
+
+# 忽略 IDE 相关文件夹
+.idea/
+.vscode/
