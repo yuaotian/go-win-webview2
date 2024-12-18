@@ -585,7 +585,7 @@ func registerHotkeys(w webview2.WebView, state *WindowState) {
 }
 ```
 
-#### JavaScript���件处理
+#### JavaScript事件处理
 ```javascript
 // 添加到HTML中的JavaScript代码
 document.addEventListener('DOMContentLoaded', function() {
@@ -629,7 +629,7 @@ document.addEventListener('DOMContentLoaded', function() {
 3. 边缘调整大小
 4. 最大化/最小化/关闭控制
 5. 快捷键支持
-6. 窗口��态管理
+6. 窗口状态管理
 7. 平滑动画过渡
 8. 响应式布局
 
@@ -955,7 +955,7 @@ w.Init(`
     meta.content = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';";
     document.head.appendChild(meta);
     
-    // ���止XSS
+    // 防止XSS
     function sanitizeHTML(str) {
         const div = document.createElement('div');
         div.textContent = str;
@@ -1005,7 +1005,7 @@ func (app *Application) sendSecureMessage(payload interface{}) {
 | `ClearCache()` | 清除缓存 |
 | `ClearCookies()` | 清除Cookies |
 
-### 开���工具
+### 开发工具
 | API | 描述 |
 |-----|------|
 | `OpenDevTools()` | 打开开发者工具 |
@@ -1055,7 +1055,7 @@ w.Init(`
 `)
 ```
 
-### Q: 如何优化WebSocket���接?
+### Q: 如何优化WebSocket连接?
 ```go
 // 启用带动重连的WebSocket
 w.Init(`
