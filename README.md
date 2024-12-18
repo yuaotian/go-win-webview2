@@ -64,7 +64,7 @@
   - 打印功能(直接打印/PDF导出)
 
 ### 事件监听
-- 📡 丰富的���件回调
+- 📡 丰富的回调
   - 页面加载状态
   - URL变化
   - 标题变化
@@ -73,7 +73,7 @@
 ### 扩展功能
 - ⚡ WebSocket支持
   - 内置WebSocket服务器
-  - ��向实时通信
+  - 双向实时通信
   - 消息处理回调
 - 🔌 JavaScript Hook机制
   - 前置/后置处理钩子
@@ -248,7 +248,7 @@ w.RegisterHotKeyString("Ctrl+Q", func() {
 
 // 注册功能热键
 w.RegisterHotKeyString("F11", func() {
-    log.Println("��换全屏...")
+    log.Println("切换全屏...")
     // 在这里保存当前状态
     isFullscreen := false // 实际应用中需要跟踪此状态
     isFullscreen = !isFullscreen
@@ -257,7 +257,7 @@ w.RegisterHotKeyString("F11", func() {
 
 // 注册组合键
 w.RegisterHotKeyString("Ctrl+Shift+D", func() {
-    log.Println("���开开发者工具...")
+    log.Println("打开开发者工具...")
     w.OpenDevTools()
 })
 
@@ -618,7 +618,7 @@ document.addEventListener('DOMContentLoaded', function() {
 主要特点：
 - 无边框设计
 - 现代化UI风格
-- 完整���窗口控制
+- 完整窗口控制
 - 状态同步管理
 - 用户体验化
 
@@ -984,7 +984,7 @@ func (app *Application) sendSecureMessage(payload interface{}) {
 | `Back()` | 后退 |
 | `Forward()` | 前进 |
 | `Stop()` | 停止加载 |
-| `ClearCache()` | 清除���存 |
+| `ClearCache()` | 清除缓存 |
 | `ClearCookies()` | 清除Cookies |
 
 ### 开发工具
