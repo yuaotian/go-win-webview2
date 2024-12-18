@@ -146,6 +146,35 @@ func NewWindow(debug bool, window unsafe.Pointer) WebView {
 
 // NewWithOptions 使用提供的选项创建一个新的 webview。
 func NewWithOptions(options WebViewOptions) WebView {
+	// 合并默认选项
+	defaultOpts := DefaultWindowOptions()
+	if options.WindowOptions.Title == "" {
+		options.WindowOptions.Title = defaultOpts.Title
+	}
+	if options.WindowOptions.Width == 0 {
+		options.WindowOptions.Width = defaultOpts.Width
+	}
+	if options.WindowOptions.Height == 0 {
+		options.WindowOptions.Height = defaultOpts.Height
+	}
+	// 默认居中显示
+	if !options.WindowOptions.Center {
+		options.WindowOptions.Center = defaultOpts.Center
+	}
+	// 合并其他默认选项
+	if !options.WindowOptions.Resizable {
+		options.WindowOptions.Resizable = defaultOpts.Resizable
+	}
+	if !options.WindowOptions.Minimizable {
+		options.WindowOptions.Minimizable = defaultOpts.Minimizable
+	}
+	if !options.WindowOptions.Maximizable {
+		options.WindowOptions.Maximizable = defaultOpts.Maximizable
+	}
+	if options.WindowOptions.DefaultBackground == "" {
+		options.WindowOptions.DefaultBackground = defaultOpts.DefaultBackground
+	}
+
 	w := &webview{
 		ctx:     context.Background(),
 		hotkeys: make(map[int]HotKeyHandler),
@@ -482,7 +511,7 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		w.DisableContextMenu()
 	}
 
-	// 设置默认背景色
+	// 设置默认背色
 	if opts.DefaultBackground != "" {
 		w.Eval(fmt.Sprintf(`
 			document.documentElement.style.background = '%s';
@@ -615,10 +644,12 @@ func (w *webview) SetSize(width int, height int, hints Hint) {
 	}
 }
 
+// 初始化(加载之前注入js，永久注入)
 func (w *webview) Init(js string) {
 	w.browser.Init(js)
 }
 
+// 执行JS(加载之后注入js，临时注入)
 func (w *webview) Eval(js string) {
 	// 应用前置钩子
 	js = w.processScript(js, JSHookBefore)

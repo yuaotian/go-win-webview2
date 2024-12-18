@@ -74,68 +74,96 @@ type _IUnknownImpl interface {
 
 type iCoreWebView2Vtbl struct {
 	_IUnknownVtbl
-	GetSettings                            ComProc
-	GetSource                              ComProc
-	Navigate                               ComProc
-	NavigateToString                       ComProc
-	AddNavigationStarting                  ComProc
-	RemoveNavigationStarting               ComProc
-	AddContentLoading                      ComProc
-	RemoveContentLoading                   ComProc
-	AddSourceChanged                       ComProc
-	RemoveSourceChanged                    ComProc
-	AddHistoryChanged                      ComProc
-	RemoveHistoryChanged                   ComProc
-	AddNavigationCompleted                 ComProc
-	RemoveNavigationCompleted              ComProc
-	AddFrameNavigationStarting             ComProc
-	RemoveFrameNavigationStarting          ComProc
-	AddFrameNavigationCompleted            ComProc
-	RemoveFrameNavigationCompleted         ComProc
-	AddScriptDialogOpening                 ComProc
-	RemoveScriptDialogOpening              ComProc
-	AddPermissionRequested                 ComProc
-	RemovePermissionRequested              ComProc
-	AddProcessFailed                       ComProc
-	RemoveProcessFailed                    ComProc
+
+	// 基础设置和导航控制
+	GetSettings      ComProc
+	GetSource        ComProc
+	Navigate         ComProc
+	NavigateToString ComProc
+
+	// 导航事件处理
+	AddNavigationStarting      ComProc
+	RemoveNavigationStarting   ComProc
+	AddContentLoading         ComProc
+	RemoveContentLoading      ComProc
+	AddSourceChanged          ComProc
+	RemoveSourceChanged       ComProc
+	AddHistoryChanged         ComProc
+	RemoveHistoryChanged      ComProc
+	AddNavigationCompleted    ComProc
+	RemoveNavigationCompleted ComProc
+
+	// 框架导航事件
+	AddFrameNavigationStarting     ComProc
+	RemoveFrameNavigationStarting  ComProc
+	AddFrameNavigationCompleted    ComProc
+	RemoveFrameNavigationCompleted ComProc
+
+	// 对话框和权限处理
+	AddScriptDialogOpening     ComProc
+	RemoveScriptDialogOpening  ComProc
+	AddPermissionRequested     ComProc
+	RemovePermissionRequested  ComProc
+	AddProcessFailed          ComProc
+	RemoveProcessFailed       ComProc
+
+	// 脚本执行和文档操作
 	AddScriptToExecuteOnDocumentCreated    ComProc
 	RemoveScriptToExecuteOnDocumentCreated ComProc
 	ExecuteScript                          ComProc
 	CapturePreview                         ComProc
-	Reload                                 ComProc
-	PostWebMessageAsJSON                   ComProc
-	PostWebMessageAsString                 ComProc
-	AddWebMessageReceived                  ComProc
-	RemoveWebMessageReceived               ComProc
-	CallDevToolsProtocolMethod             ComProc
-	GetBrowserProcessID                    ComProc
-	GetCanGoBack                           ComProc
-	GetCanGoForward                        ComProc
-	GoBack                                 ComProc
-	GoForward                              ComProc
-	GetDevToolsProtocolEventReceiver       ComProc
-	Stop                                   ComProc
-	AddNewWindowRequested                  ComProc
-	RemoveNewWindowRequested               ComProc
-	AddDocumentTitleChanged                ComProc
-	RemoveDocumentTitleChanged             ComProc
-	GetDocumentTitle                       ComProc
-	AddHostObjectToScript                  ComProc
-	RemoveHostObjectFromScript             ComProc
-	OpenDevToolsWindow                     ComProc
+
+	// 页面控制和消息通信
+	Reload                ComProc
+	PostWebMessageAsJSON  ComProc
+	PostWebMessageAsString ComProc
+	AddWebMessageReceived    ComProc
+	RemoveWebMessageReceived ComProc
+
+	// 开发者工具和浏览器进程
+	CallDevToolsProtocolMethod       ComProc
+	GetBrowserProcessID              ComProc
+	GetDevToolsProtocolEventReceiver ComProc
+
+	// 导航历史控制
+	GetCanGoBack    ComProc
+	GetCanGoForward ComProc
+	GoBack          ComProc
+	GoForward       ComProc
+	Stop            ComProc
+
+	// 窗口和文档标题管理
+	AddNewWindowRequested     ComProc
+	RemoveNewWindowRequested  ComProc
+	AddDocumentTitleChanged   ComProc
+	RemoveDocumentTitleChanged ComProc
+	GetDocumentTitle          ComProc
+
+	// 脚本对象和开发者工具
+	AddHostObjectToScript     ComProc
+	RemoveHostObjectFromScript ComProc
+	OpenDevToolsWindow        ComProc
+
+	// 全屏元素控制
 	AddContainsFullScreenElementChanged    ComProc
 	RemoveContainsFullScreenElementChanged ComProc
 	GetContainsFullScreenElement           ComProc
-	AddWebResourceRequested                ComProc
-	RemoveWebResourceRequested             ComProc
-	AddWebResourceRequestedFilter          ComProc
-	RemoveWebResourceRequestedFilter       ComProc
-	AddWindowCloseRequested                ComProc
-	RemoveWindowCloseRequested             ComProc
-	PrintToPdf                           ComProc
-	ShowPrintUI                          ComProc
-	AddPrintCompleted                    ComProc
-	RemovePrintCompleted                 ComProc
+
+	// Web资源请求处理
+	AddWebResourceRequested       ComProc
+	RemoveWebResourceRequested    ComProc
+	AddWebResourceRequestedFilter ComProc
+	RemoveWebResourceRequestedFilter ComProc
+
+	// 窗口关闭处理
+	AddWindowCloseRequested    ComProc
+	RemoveWindowCloseRequested ComProc
+
+	// 打印功能
+	PrintToPdf          ComProc
+	ShowPrintUI         ComProc
+	AddPrintCompleted   ComProc
+	RemovePrintCompleted ComProc
 }
 
 type ICoreWebView2 struct {

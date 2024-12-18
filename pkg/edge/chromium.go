@@ -47,16 +47,16 @@ type Chromium struct {
 
 func NewChromium() *Chromium {
 	e := &Chromium{}
-	/*
-	 All these handlers are passed to native code through syscalls with 'uintptr(unsafe.Pointer(handler))' and we know
-	 that a pointer to those will be kept in the native code. Furthermore these handlers als contain pointer to other Go
-	 structs like the vtable.
-	 This violates the unsafe.Pointer rule '(4) Conversion of a Pointer to a uintptr when calling syscall.Syscall.' because
-	 theres no guarantee that Go doesn't move these objects.
-	 AFAIK currently the Go runtime doesn't move HEAP objects, so we should be safe with these handlers. But they don't
-	 guarantee it, because in the future Go might use a compacting GC.
-	 There's a proposal to add a runtime.Pin function, to prevent moving pinned objects, which would allow to easily fix
-	 this issue by just pinning the handlers. The https://go-review.googlesource.com/c/go/+/367296/ should land in Go 1.19.
+/*
+	 所有这些处理程序都通过带有“uintptr(unsafe.Pointer(handler))”的系统调用传递给本机代码，我们知道
+	 指向这些的指针将保留在本机代码中。此外，这些处理程序还包含指向其他 Go 的指针
+	 像 vtable 这样的结构。
+	 这违反了 unsafe.Pointer 规则“(4) 在调用 syscall.Syscall 时将指针转换为 uintptr”。因为
+	 无法保证 Go 不会移动这些对象。
+据我所知，目前 Go 运行时不会移动 HEAP 对象，因此我们使用这些处理程序应该是安全的。但他们不
+	 保证它，因为将来 Go 可能会使用压缩 GC。
+	 有人建议添加一个runtime.Pin函数，以防止移动固定对象，这将允许轻松修复
+	 只需固定处理程序即可解决此问题。 https://go-review.googlesource.com/c/go/+/367296/应该登陆 Go 1.19。
 	*/
 	e.envCompleted = newICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler(e)
 	e.controllerCompleted = newICoreWebView2CreateCoreWebView2ControllerCompletedHandler(e)

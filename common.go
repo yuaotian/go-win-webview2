@@ -69,9 +69,9 @@ type WebView interface {
 	Navigate(url string)
 	// 设置HTML
 	SetHtml(html string)
-	// 初始化 
+	//初始化(加载之前注入js，永久注入)
 	Init(js string)
-	// 执行JS
+	// 执行JS（加载之后注入js，临时注入）
 	Eval(js string)
 	// 绑定函数
 	Bind(name string, f interface{}) error
