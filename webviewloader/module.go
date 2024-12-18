@@ -26,7 +26,7 @@ var (
 	memErr                                          error
 )
 
-// CompareBrowserVersions will compare the 2 given versions and return:
+// CompareBrowserVersions 将比较 2 个给定版本并返回：
 //
 //	-1 = v1 < v2
 //	 0 = v1 == v2
@@ -68,16 +68,16 @@ func CompareBrowserVersions(v1 string, v2 string) (int, error) {
 	return result, nil
 }
 
-// GetInstalledVersion returns the installed version of the webview2 runtime.
-// If there is no version installed, a blank string is returned.
+//GetInstalledVersion 返回 webview2 运行时的已安装版本。
+//如果没有安装版本，则返回空字符串。
 func GetInstalledVersion() (string, error) {
-	// GetAvailableCoreWebView2BrowserVersionString is documented as:
-	//	public STDAPI GetAvailableCoreWebView2BrowserVersionString(PCWSTR browserExecutableFolder, LPWSTR * versionInfo)
-	// where winnt.h defines STDAPI as:
-	//	EXTERN_C HRESULT STDAPICALLTYPE
-	// the first part (EXTERN_C) can be ignored since it's only relevent to C++,
-	// HRESULT is return type which means it returns an integer that will be 0 (S_OK) on success,
-	// and finally STDAPICALLTYPE tells us the function uses the stdcall calling convention (what Go assumes for syscalls).
+//GetAvailableCoreWebView2BrowserVersionString 记录为：
+	//公共 STDAPI GetAvailableCoreWebView2BrowserVersionString(PCWSTR browserExecutableFolder, LPWSTR *versionInfo)
+	//其中 winnt.h 将 STDAPI 定义为：
+	//EXTERN_C HRESULT STDAPICALLTYPE
+	//第一部分 (EXTERN_C) 可以忽略，因为它只与 C++ 相关，
+	//HRESULT 是返回类型，这意味着它返回一个整数，如果成功，该整数将为 0 (S_OK)，
+//最后 STDAPICALLTYPE 告诉我们该函数使用 stdcall 调用约定（Go 对系统调用的假设）。
 
 	nativeErr := nativeModule.Load()
 	if nativeErr == nil {
@@ -92,7 +92,7 @@ func GetInstalledVersion() (string, error) {
 		hr64, _, _ := memGetAvailableCoreWebView2BrowserVersionString.Call(
 			uint64(uintptr(unsafe.Pointer(nil))),
 			uint64(uintptr(unsafe.Pointer(&result))))
-		hr = uintptr(hr64) // The return size of the HRESULT will be whatver native size is (i.e uintptr) and not 64-bits on 32-bit systems.  In both cases it should be interpreted as 32-bits (a LONG).
+		hr = uintptr(hr64) // THRESULT 的返回大小将是本机大小（即 uintptr），而不是 32 位系统上的 64 位。  在这两种情况下，它都应该被解释为 32 位（LONG）。
 	} else {
 		hr, _, _ = nativeGetAvailableCoreWebView2BrowserVersionString.Call(
 			uintptr(unsafe.Pointer(nil)),
@@ -101,17 +101,17 @@ func GetInstalledVersion() (string, error) {
 	defer windows.CoTaskMemFree(unsafe.Pointer(result)) // Safe even if result is nil
 	if hr != uintptr(windows.S_OK) {
 		if hr&0xFFFF == uintptr(windows.ERROR_FILE_NOT_FOUND) {
-			// The lower 16-bits (the error code itself) of the HRESULT is ERROR_FILE_NOT_FOUND which means the system isn't installed.
-			return "", nil // Return a blank string but no error since we successfully detected no install.
+			// HRESULT 的低 16 位（错误代码本身）是 ERROR_FILE_NOT_FOUND，这意味着系统未安装。
+			return "", nil // 返回一个空白字符串，但没有错误，因为我们成功检测到没有安装。
 		}
 		return "", fmt.Errorf("GetAvailableCoreWebView2BrowserVersionString returned HRESULT 0x%X", hr)
 	}
-	version := windows.UTF16PtrToString(result) // Safe even if result is nil
+	version := windows.UTF16PtrToString(result) // 即使结果为零也是安全的
 	return version, nil
 }
 
-// CreateCoreWebView2EnvironmentWithOptions tries to load WebviewLoader2 and
-// call the CreateCoreWebView2EnvironmentWithOptions routine.
+//CreateCoreWebView2EnvironmentWithOptions 尝试加载 WebviewLoader2 并
+//调用 CreateCoreWebView2EnvironmentWithOptions 例程。
 func CreateCoreWebView2EnvironmentWithOptions(browserExecutableFolder, userDataFolder *uint16, environmentOptions uintptr, environmentCompletedHandle uintptr) (uintptr, error) {
 	nativeErr := nativeModule.Load()
 	if nativeErr == nil {
@@ -141,7 +141,7 @@ func CreateCoreWebView2EnvironmentWithOptions(browserExecutableFolder, userDataF
 
 func loadFromMemory(nativeErr error) error {
 	var err error
-	// DLL is not available natively. Try loading embedded copy.
+	// DLL 本身不可用。尝试加载嵌入副本。
 	memOnce.Do(func() {
 		memModule, memErr = winloader.LoadFromMemory(WebView2Loader)
 		if memErr != nil {

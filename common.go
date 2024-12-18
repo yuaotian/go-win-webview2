@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/yuaotian/go-win-webview2/internal/w32"
+	"github.com/gorilla/websocket"
 )
 
 // 错误定义
@@ -48,29 +49,48 @@ type WebView interface {
 
 	// 窗口控制
 	Run()
+	// 运行
+	RunAsync()
+	// 终止
 	Terminate()
 	// 调度函数
 	Dispatch(f func())
 	// 调度函数
 	DispatchAsync(f func())
+	// 销毁
 	Destroy()
+	// 获取窗口
 	Window() unsafe.Pointer
+	// 设置标题
 	SetTitle(title string)
+	// 设置大小
 	SetSize(w int, h int, hint Hint)
+	// 导航
 	Navigate(url string)
+	// 设置HTML
 	SetHtml(html string)
+	// 初始化 
 	Init(js string)
+	// 执行JS
 	Eval(js string)
+	// 绑定函数
 	Bind(name string, f interface{}) error
 
 	// 热键相关
 	RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandler) error
+	// 注销热键
 	UnregisterHotKey(modifiers int, keyCode int)
+	// 注册热键字符串
 	RegisterHotKeyString(hotkey string, handler HotKeyHandler) error
 
 	// 窗口状态
 	SetFullscreen(enable bool)
+	// 设置置顶
 	SetAlwaysOnTop(enable bool)
+	// 设置最小化
+	SetMinimized(enable bool)
+	// 设置最大化
+	SetMaximized(enable bool)
 
 	// 新增方法
 	Minimize()                  // 最小化窗口
@@ -96,12 +116,32 @@ type WebView interface {
 	OnURLChanged(func(url string))               // URL 变化
 	OnTitleChanged(func(title string))           // 标题变化
 	OnFullscreenChanged(func(isFullscreen bool)) // 全屏状态变化
+
+	// 打印相关方法
+	Print()                    // 直接打印
+	PrintToPDF(path string)    // 打印到 PDF 文件
+	ShowPrintDialog()          // 显示打印对话框
+
+	// 右键菜单控制
+	DisableContextMenu()    // 禁用右键菜单
+	EnableContextMenu()     // 启用右键菜单
+
+	// JavaScript Hook 相关方法
+	AddJSHook(hook JSHook)           // 添加 JS Hook
+	RemoveJSHook(hook JSHook)        // 移除 JS Hook
+	ClearJSHooks()                   // 清除所有 JS Hook
+
+	// WebSocket 相关方法
+	EnableWebSocket(port int) error              // 启用 WebSocket 服务
+	DisableWebSocket()                           // 禁用 WebSocket 服务
+	OnWebSocketMessage(handler WebSocketHandler) // 设置 WebSocket 消息处理器
+	SendWebSocketMessage(message string)         // 发送 WebSocket 消息
 }
 
-// HotKey 表示一个热键组合
+// HotKey 表示一个键组合
 type HotKey struct {
-	Modifiers int
-	KeyCode   int
+	Modifiers int // 修饰符
+	KeyCode   int // 键码
 }
 
 // ParseHotKey 将热键字符串解析为 HotKey 结构
@@ -175,4 +215,61 @@ func ParseHotKey(s string) (HotKey, error) {
 	}
 
 	return HotKey{Modifiers: modifiers, KeyCode: keyCode}, nil
+}
+
+// JSHookType 定义 Hook 的类型
+type JSHookType int
+
+const (
+	JSHookBefore JSHookType = iota  // JS 执行前
+	JSHookAfter                     // JS 执行后
+)
+
+// JSHook 定义 JavaScript 钩子接口
+type JSHook interface {
+	Type() JSHookType              // 获取 Hook 类型
+	Handle(script string) string   // 处理脚本
+	Priority() int                 // Hook 优先级，数字越小优先级越高
+}
+
+// BaseJSHook 提供基本的 JSHook 实现
+type BaseJSHook struct {
+	HookType     JSHookType
+	Handler      func(script string) string
+	HookPriority int
+}
+
+func (h *BaseJSHook) Type() JSHookType {
+	return h.HookType
+}
+
+func (h *BaseJSHook) Handle(script string) string {
+	if h.Handler != nil {
+		return h.Handler(script)
+	}
+	return script
+}
+
+func (h *BaseJSHook) Priority() int {
+	return h.HookPriority
+}
+
+// WebSocketHandler 定义 WebSocket 消息处理函数
+type WebSocketHandler func(message string)
+
+// WebSocketHook 定义 WebSocket 相关的 JSHook
+type WebSocketHook struct {
+	BaseJSHook
+	wsConn *websocket.Conn
+}
+
+// NewWebSocketHook 创建新的 WebSocket Hook
+func NewWebSocketHook(conn *websocket.Conn) *WebSocketHook {
+	return &WebSocketHook{
+		BaseJSHook: BaseJSHook{
+			HookType:     JSHookBefore,
+			HookPriority: 0,
+		},
+		wsConn: conn,
+	}
 }

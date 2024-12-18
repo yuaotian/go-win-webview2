@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"unsafe"
+	"errors"
 
 	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"golang.org/x/sys/windows"
@@ -358,4 +359,56 @@ func (e *Chromium) Focus() {
 		return
 	}
 	_ = e.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
+}
+
+// PrintToPDF 将当前页面打印到 PDF 文件
+func (e *Chromium) PrintToPDF(path string) error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+
+	// 转换文件路径为 UTF16
+	_path, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+
+	// 调用 WebView2 的 PrintToPdf 方法
+	_, _, err = e.webview.vtbl.PrintToPdf.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(_path)),
+		0, // 使用默认打印设置
+	)
+
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+
+	return nil
+}
+
+// 添加打印相关的回调处理
+func (e *Chromium) handlePrintCompleted(success bool, errorCode int) {
+	// 处理打印完成事件
+	if !success {
+		log.Printf("Print failed with error code: %d", errorCode)
+	}
+}
+
+// DisableContextMenu 禁用上下文菜单
+func (e *Chromium) DisableContextMenu() error {
+	if settings, err := e.GetSettings(); err != nil {
+		return err
+	} else {
+		return settings.PutAreDefaultContextMenusEnabled(false)
+	}
+}
+
+// EnableContextMenu 启用上下文菜单
+func (e *Chromium) EnableContextMenu() error {
+	if settings, err := e.GetSettings(); err != nil {
+		return err
+	} else {
+		return settings.PutAreDefaultContextMenusEnabled(true)
+	}
 }

@@ -142,7 +142,7 @@ func main() {
         }
     `)
 
-    // 绑定Go���数到JavaScript
+    // 绑定Go到JavaScript
     w.Bind("greet", func(name string) string {
         return "Hello, " + name + "!"
     })

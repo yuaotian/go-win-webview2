@@ -83,6 +83,7 @@ const (
 	SW_MINIMIZE = 6
 	SW_MAXIMIZE = 3
 	SW_RESTORE  = 9
+	SW_HIDE     = 0
 )
 
 const (

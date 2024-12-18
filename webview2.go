@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"reflect"
 	"strconv"
 	"sync"
+	"time"
 	"unsafe"
 
+	"github.com/gorilla/websocket"
 	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"github.com/yuaotian/go-win-webview2/pkg/edge"
 
@@ -44,6 +47,10 @@ type browser interface {
 	Eval(script string)
 	NotifyParentWindowPositionChanged() error
 	Focus()
+	PrintToPDF(path string) error
+	DisableContextMenu() error
+	EnableContextMenu() error
+	GetSettings() (*edge.ICoreWebViewSettings, error)
 }
 
 type webview struct {
@@ -58,23 +65,53 @@ type webview struct {
 	dispatchq  []func()
 	ctx        context.Context
 	hotkeys    map[int]HotKeyHandler
+	jsHooks    []JSHook  // JavaScript hooks
 
-	// 状态监听回调
+	// 状态听回调
 	onLoadingStateChanged func(bool)
 	onURLChanged          func(string)
 	onTitleChanged        func(string)
 	onFullscreenChanged   func(bool)
+
+	wsServer     *http.Server
+	wsUpgrader   websocket.Upgrader
+	wsHandler    WebSocketHandler
+	wsConnections sync.Map
 }
 
 type WindowOptions struct {
-	Title       string
-	Width       uint
-	Height      uint
-	IconId      uint
-	Center      bool
-	Frameless   bool
-	Fullscreen  bool // 是否全屏
-	AlwaysOnTop bool // 是否置顶
+	Title       string // 窗口标题
+	Width       uint   // 窗口宽度
+	Height      uint   // 窗口高度
+	IconId      uint   // 图标ID
+	Center      bool   // 是否居中
+	Frameless   bool   // 是否无边框
+	Fullscreen  bool   // 是否全屏
+	AlwaysOnTop bool   // 是否置顶
+	Resizable   bool   // 是否可调整大小
+	Minimizable bool   // 是否可最小化
+	Maximizable bool   // 是否可最大化
+	DisableContextMenu bool // 是否禁用右键菜单
+	EnableDragAndDrop  bool // 是否启用拖放
+	HideWindowOnClose  bool // 关闭时是否隐藏窗口而不是退出
+	DefaultBackground  string // 默认背景色 (CSS 格式，如 "#FFFFFF")
+}
+
+// 添加默认配置
+func DefaultWindowOptions() WindowOptions {
+	return WindowOptions{
+		Title:       "WebView2",
+		Width:       800,
+		Height:      600,
+		Center:      true,
+		Resizable:   true,
+		Minimizable: true,
+		Maximizable: true,
+		DisableContextMenu: false,
+		EnableDragAndDrop: true,
+		HideWindowOnClose: false,
+		DefaultBackground: "#FFFFFF",
+	}
 }
 
 type WebViewOptions struct {
@@ -85,7 +122,7 @@ type WebViewOptions struct {
 	//浏览器实例。
 	DataPath string
 
-	//当窗口打开时，AutoFocus 将尝试保持 WebView2 小部件聚焦
+	//窗口打开时，AutoFocus 将尝试保持 WebView2 小部件聚焦
 	//已聚焦。
 	AutoFocus bool
 
@@ -95,9 +132,12 @@ type WebViewOptions struct {
 }
 
 // New 在新窗口中创建一个新的 webview。
-func New(debug bool) WebView { return NewWithOptions(WebViewOptions{Debug: debug}) }
+func New(debug bool) WebView { 
+	return NewWithOptions(WebViewOptions{Debug: debug}) 
+	
+}
 
-// NewWindow 使用现有窗口创建一个新的 webview。
+// NewWindow 使用现有窗创一个新的 webview。
 //
 // 已弃用：使用 NewWithOptions。
 func NewWindow(debug bool, window unsafe.Pointer) WebView {
@@ -280,7 +320,7 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			// 定义边框拖拽区域宽度
 			const borderWidth = 5
 
-			// 检查是否在拖拽区域内
+			// 检查是否在拖拽域内
 			if y >= rect.Top && y <= rect.Top+borderWidth {
 				if x >= rect.Left && x <= rect.Left+borderWidth {
 					return w32.HTTopLeft
@@ -306,7 +346,7 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 				return w32.HTRight
 			}
 
-			// 允许拖动窗口
+			// 允许动窗口
 			return w32.HTCaption
 
 		case w32.WMLButtonDown:
@@ -387,18 +427,27 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		posY = w32.CW_USEDEFAULT
 	}
 
-	var style uint32 = w32.WSOverlappedWindow // 默认样式
-
+	var style uint32 = w32.WSOverlappedWindow
 	if opts.Frameless {
-		// 无边框窗口样式
 		style = w32.WSPopup | w32.WSVisible
+	} else {
+		// 根据选项调整窗口样式
+		if !opts.Resizable {
+			style &^= w32.WSThickFrame
+		}
+		if !opts.Minimizable {
+			style &^= w32.WSMinimizeBox
+		}
+		if !opts.Maximizable {
+			style &^= w32.WSMaximizeBox
+		}
 	}
 
 	w.hwnd, _, _ = w32.User32CreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
-		uintptr(style), // 使用新的样式
+		uintptr(style), // 使用新的式
 		uintptr(posX),
 		uintptr(posY),
 		uintptr(windowWidth),
@@ -426,6 +475,35 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 
 	if opts.AlwaysOnTop {
 		w.SetAlwaysOnTop(true)
+	}
+
+	// 应用其他选项
+	if opts.DisableContextMenu {
+		w.DisableContextMenu()
+	}
+
+	// 设置默认背景色
+	if opts.DefaultBackground != "" {
+		w.Eval(fmt.Sprintf(`
+			document.documentElement.style.background = '%s';
+			document.body.style.background = '%s';
+		`, opts.DefaultBackground, opts.DefaultBackground))
+	}
+
+	// 处理窗口关闭行为
+	if opts.HideWindowOnClose {
+		w.Bind("__handleWindowClose", func() {
+			w.Dispatch(func() {
+				_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_HIDE)
+			})
+		})
+		w.Init(`
+			window.onbeforeunload = function(e) {
+				window.__handleWindowClose();
+				e.preventDefault();
+				return false;
+			};
+		`)
 	}
 
 	return true
@@ -542,7 +620,15 @@ func (w *webview) Init(js string) {
 }
 
 func (w *webview) Eval(js string) {
-	w.browser.Eval(js)
+	// 应用前置钩子
+	js = w.processScript(js, JSHookBefore)
+	
+	w.Dispatch(func() {
+		w.browser.Eval(js)
+	})
+	
+	// 应用后置钩子
+	js = w.processScript(js, JSHookAfter)
 }
 
 func (w *webview) Dispatch(f func()) {
@@ -631,7 +717,7 @@ func (w *webview) RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandl
 	w.m.Lock()
 	defer w.m.Unlock()
 
-	// ���化热键映射
+	// 化热键映射
 	if w.hotkeys == nil {
 		w.hotkeys = make(map[int]HotKeyHandler)
 	}
@@ -663,7 +749,7 @@ func (w *webview) UnregisterHotKey(modifiers int, keyCode int) {
 	// 查找对应的热键ID
 	var hotkeyID int
 	for id := range w.hotkeys {
-		// 这里简化处理，实际应该保modifiers和keyCode来确保完全匹配
+		// 这里简化处理，实际应该保modifiers和keyCode来确保全配
 		hotkeyID = id
 		break
 	}
@@ -700,7 +786,7 @@ func (w *webview) SetFullscreen(enable bool) {
 		style &^= w32.WSOverlappedWindow
 		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
 
-		// 设置全屏 - 使用整个屏幕尺寸
+		// 设置全 - 使用整个屏幕尺寸
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd,
 			uintptr(w32.HWND_TOP),
@@ -908,4 +994,301 @@ func (w *webview) DispatchAsync(f func()) {
 		w.m.Unlock()
 		_, _, _ = w32.User32PostThreadMessageW.Call(w.mainthread, w32.WMApp, 0, 0)
 	}()
+}
+
+// Print 直接使用默认打印机打印前页面
+func (w *webview) Print() {
+	w.Eval(`window.print()`)
+}
+
+// PrintToPDF 将当前页面打印到 PDF 文件
+func (w *webview) PrintToPDF(path string) {
+	// 使用 WebView2 的 PrintToPdf 方法
+	if w.browser != nil {
+		if err := w.browser.PrintToPDF(path); err != nil {
+			log.Printf("Failed to print to PDF: %v", err)
+		}
+	}
+}
+
+// ShowPrintDialog 显示打印对话框
+func (w *webview) ShowPrintDialog() {
+	w.Eval(`window.print()`)
+}
+
+// DisableContextMenu 禁用右键菜单
+func (w *webview) DisableContextMenu() {
+	// 通过 JavaScript 禁用右键菜单
+	w.Eval(`
+		document.addEventListener('contextmenu', function(e) {
+			e.preventDefault();
+			return false;
+		}, true);
+	`)
+	
+	// 同时设置 WebView2 的默认上下文菜单
+	if w.browser != nil {
+		_ = w.browser.DisableContextMenu()
+	}
+}
+
+// EnableContextMenu 启用右键菜单
+func (w *webview) EnableContextMenu() {
+	// 移除 JavaScript 的右键菜单禁用
+	w.Eval(`
+		document.removeEventListener('contextmenu', function(e) {
+			e.preventDefault();
+			return false;
+		}, true);
+	`)
+	
+	// 同时恢复 WebView2 的默认上下文菜单
+	if w.browser != nil {
+		_ = w.browser.EnableContextMenu()
+	}
+}
+
+// RunAsync 异步运行 webview
+func (w *webview) RunAsync() {
+	// 启动一个新的 goroutine 来运行消息循环
+	go func() {
+		// 运行消息循环直到收到退出消息
+		var msg w32.Msg
+		for {
+			r, _, _ := w32.User32GetMessageW.Call(
+				uintptr(unsafe.Pointer(&msg)),
+				0,
+				0,
+				0,
+			)
+			if r == 0 {
+				break
+			}
+
+			// 处理热键消息
+			if msg.Message == w32.WMHotKey {
+				if handler, ok := w.hotkeys[int(msg.WParam)]; ok && handler != nil {
+					handler()
+					continue
+				}
+			}
+
+			// 处理分发的消息
+			if msg.Message == w32.WMApp {
+				w.m.Lock()
+				if len(w.dispatchq) > 0 {
+					f := w.dispatchq[0]
+					w.dispatchq = w.dispatchq[1:]
+					w.m.Unlock()
+					f()
+					continue
+				}
+				w.m.Unlock()
+			}
+
+			// 处理常规窗口消息
+			_, _, _ = w32.User32TranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+			_, _, _ = w32.User32DispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+		}
+	}()
+}
+
+// SetMaximized 设置窗口最大化状态
+func (w *webview) SetMaximized(enable bool) {
+	w.Dispatch(func() {
+		if enable {
+			_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_MAXIMIZE)
+		} else {
+			_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_RESTORE)
+		}
+	})
+}
+
+// SetMinimized 设置窗口最小化状态
+func (w *webview) SetMinimized(enable bool) {
+	w.Dispatch(func() {
+		if enable {
+			_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_MINIMIZE)
+		} else {
+			_, _, _ = w32.User32ShowWindow.Call(w.hwnd, w32.SW_RESTORE)
+		}
+	})
+}
+
+// AddJSHook 添加 JavaScript 钩子
+func (w *webview) AddJSHook(hook JSHook) {
+	w.m.Lock()
+	defer w.m.Unlock()
+	
+	// 按优先级插入
+	inserted := false
+	for i, h := range w.jsHooks {
+		if hook.Priority() < h.Priority() {
+			// 在此位置插入
+			w.jsHooks = append(w.jsHooks[:i], append([]JSHook{hook}, w.jsHooks[i:]...)...)
+			inserted = true
+			break
+		}
+	}
+	if !inserted {
+		w.jsHooks = append(w.jsHooks, hook)
+	}
+}
+
+// RemoveJSHook 移除 JavaScript 钩子
+func (w *webview) RemoveJSHook(hook JSHook) {
+	w.m.Lock()
+	defer w.m.Unlock()
+	
+	for i, h := range w.jsHooks {
+		if h == hook {
+			w.jsHooks = append(w.jsHooks[:i], w.jsHooks[i+1:]...)
+			break
+		}
+	}
+}
+
+// ClearJSHooks 清除所有 JavaScript 钩子
+func (w *webview) ClearJSHooks() {
+	w.m.Lock()
+	defer w.m.Unlock()
+	w.jsHooks = nil
+}
+
+// processScript 处理脚本，应用所有钩子
+func (w *webview) processScript(script string, hookType JSHookType) string {
+	w.m.Lock()
+	defer w.m.Unlock()
+	
+	result := script
+	for _, hook := range w.jsHooks {
+		if hook.Type() == hookType {
+			result = hook.Handle(result)
+		}
+	}
+	return result
+}
+
+// EnableWebSocket 启用 WebSocket 服务
+func (w *webview) EnableWebSocket(port int) error {
+	w.wsUpgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true // 允许所有来源
+		},
+	}
+
+	// 创建 WebSocket 处理器
+	http.HandleFunc("/ws", func(writer http.ResponseWriter, r *http.Request) {
+		conn, err := w.wsUpgrader.Upgrade(writer, r, nil)
+		if err != nil {
+			log.Printf("WebSocket upgrade failed: %v", err)
+			return
+		}
+
+		// 保存连接
+			connID := fmt.Sprintf("%p", conn)
+			w.wsConnections.Store(connID, conn)
+
+			// 创建并添加 WebSocket Hook
+			wsHook := NewWebSocketHook(conn)
+			w.AddJSHook(wsHook)
+
+			// 处理消息
+			go func() {
+				defer func() {
+					conn.Close()
+					w.wsConnections.Delete(connID)
+					w.RemoveJSHook(wsHook)
+				}()
+
+				for {
+					_, message, err := conn.ReadMessage()
+					if err != nil {
+						if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+							log.Printf("WebSocket read error: %v", err)
+						}
+						return
+					}
+
+					if w.wsHandler != nil {
+						w.wsHandler(string(message))
+					}
+				}
+			}()
+	})
+
+	// 启动 WebSocket 服务器
+	w.wsServer = &http.Server{
+		Addr: fmt.Sprintf(":%d", port),
+	}
+
+	go func() {
+		if err := w.wsServer.ListenAndServe(); err != http.ErrServerClosed {
+			log.Printf("WebSocket server error: %v", err)
+		}
+	}()
+
+	// 注入 WebSocket 客户端代码
+	w.Eval(`
+		if (!window._webSocket) {
+			window._webSocket = new WebSocket('ws://localhost:` + fmt.Sprint(port) + `/ws');
+			window._webSocket.onmessage = function(event) {
+				try {
+					const data = JSON.parse(event.data);
+					if (data.type === 'eval') {
+						eval(data.script);
+					}
+				} catch(e) {
+					console.error('WebSocket message error:', e);
+				}
+			};
+		}
+	`)
+
+	return nil
+}
+
+// DisableWebSocket 禁用 WebSocket 服务
+func (w *webview) DisableWebSocket() {
+	if w.wsServer != nil {
+		// 关闭所有连接
+		w.wsConnections.Range(func(key, value interface{}) bool {
+			if conn, ok := value.(*websocket.Conn); ok {
+				conn.Close()
+			}
+			return true
+		})
+
+		// 关闭服务器
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		w.wsServer.Shutdown(ctx)
+		w.wsServer = nil
+	}
+
+	// 清理客户端 WebSocket
+	w.Eval(`
+		if (window._webSocket) {
+			window._webSocket.close();
+			window._webSocket = null;
+		}
+	`)
+}
+
+// OnWebSocketMessage 设置 WebSocket 消息处理器
+func (w *webview) OnWebSocketMessage(handler WebSocketHandler) {
+	w.wsHandler = handler
+}
+
+// SendWebSocketMessage 发送 WebSocket 消息
+func (w *webview) SendWebSocketMessage(message string) {
+	w.wsConnections.Range(func(key, value interface{}) bool {
+		if conn, ok := value.(*websocket.Conn); ok {
+			err := conn.WriteMessage(websocket.TextMessage, []byte(message))
+			if err != nil {
+				log.Printf("WebSocket write error: %v", err)
+			}
+		}
+		return true
+	})
 }

@@ -132,6 +132,10 @@ type iCoreWebView2Vtbl struct {
 	RemoveWebResourceRequestedFilter       ComProc
 	AddWindowCloseRequested                ComProc
 	RemoveWindowCloseRequested             ComProc
+	PrintToPdf                           ComProc
+	ShowPrintUI                          ComProc
+	AddPrintCompleted                    ComProc
+	RemovePrintCompleted                 ComProc
 }
 
 type ICoreWebView2 struct {
@@ -408,4 +412,10 @@ func (i *ICoreWebView2) AddNavigationCompleted(eventHandler *ICoreWebView2Naviga
 		return err
 	}
 	return nil
+}
+
+// ICoreWebView2PrintCompletedHandler
+
+type ICoreWebView2PrintCompletedHandler interface {
+	Invoke(errorCode int, printStatus int) uintptr
 }
