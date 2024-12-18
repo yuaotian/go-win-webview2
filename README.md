@@ -1,7 +1,7 @@
 # 🚀 go-win-webview2
 
 <p align="center">
-  <img src="assets/logo.png" alt="Logo" width="200" height="200">
+  <img src="assets/logo.svg" alt="WebView2 Logo" width="200" height="200">
 </p>
 
 <p align="center">
@@ -142,7 +142,7 @@ func main() {
         }
     `)
 
-    // 绑定Go函数到JavaScript
+    // 绑定Go���数到JavaScript
     w.Bind("greet", func(name string) string {
         return "Hello, " + name + "!"
     })

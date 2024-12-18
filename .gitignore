@@ -21,3 +21,7 @@ src/cache/
 # 忽略 IDE 相关文件夹
 .idea/
 .vscode/
+
+# 确保不忽略 assets 目录
+!assets/
+!assets/logo.svg

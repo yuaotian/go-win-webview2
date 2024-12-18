@@ -1,7 +1,10 @@
 MIT License
 
+Copyright (c) 2024 煎饼果子卷鲨鱼辣椒/yuaotian
+Copyright (c) 2024 jchv/go-webview2
 Copyright (c) 2020 John Chadwick
-Some portions Copyright (c) 2017 Serge Zaitsev
+Copyright (c) 2017 Serge Zaitsev
+Copyright (c) Microsoft Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,3 +23,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Note: This project includes components from Microsoft Edge WebView2, which are 
+subject to their respective licenses. The WebView2Loader components are 
+licensed by Microsoft Corporation under their own terms.
