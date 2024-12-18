@@ -88,10 +88,10 @@
 
 
 <p align="center">
-  <img src="assets/js-hook.gif" alt="JS Hook Demo" width="600">
+  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/js-hook-1.png?raw=true" alt="JS Hook Demo" width="600">
 
   <br>
-  <img src="assets/js-hook.png" alt="JS Hook Architecture" width="600">
+  <img src="https://github.com/yuaotian/go-win-webview2/blob/master/assets/js-hook-2.gif?raw=true" alt="JS Hook Architecture" width="600">
   <em>JS Hook 运行演示</em>
 </p>
 
