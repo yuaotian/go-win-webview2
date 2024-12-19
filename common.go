@@ -118,7 +118,6 @@ type WebView interface {
 	OnURLChanged(func(url string))               // URL 变化
 	OnTitleChanged(func(title string))           // 标题变化
 	OnFullscreenChanged(func(isFullscreen bool)) // 全屏状态变化
-	OnNewWindowRequested(func(url string) bool)  // 新窗口请求
 	OnNavigationStarting(func())                 // 导航开始
 
 	// 打印相关方法

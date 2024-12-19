@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	webview2 "github.com/yuaotian/go-win-webview2"
@@ -36,9 +35,9 @@ func main() {
 			Resizable:          true,      // 可调整大小
 			Minimizable:        true,      // 可最小化
 			Maximizable:        true,      // 可最大化
-			DisableContextMenu: false,      // 禁用右键菜单
+			DisableContextMenu: false,     // 禁用右键菜单
 			EnableDragAndDrop:  true,      // 启用拖放
-			HideWindowOnClose:  false,     // 关闭时是否隐藏窗口不是退出
+			HideWindowOnClose:  false,     // 关闭时是否隐藏窗不是退出
 			DefaultBackground:  "#FFFFFF", // 默认背景色 (CSS 格式，如 "#FFFFFF")
 		},
 	})
@@ -47,7 +46,7 @@ func main() {
 	}
 	defer w.Destroy()
 	miniWindow := false
-	// 基本控制热键
+	// 基本制热键
 	hotkeys := map[string]struct {
 		desc    string
 		handler webview2.HotKeyHandler
@@ -160,10 +159,10 @@ func main() {
 	w.DisableContextMenu()
 
 	// 加载网页
-	w.Navigate("https://html5test.com/")
+	w.Navigate("https://www.baidu.com/")
 
 	// 设置半透明
-	w.SetOpacity(0.95)
+	w.SetOpacity(1)
 
 	// 居中显示
 	w.Center()
@@ -200,75 +199,6 @@ func main() {
 			})
 		}
 	}()
-
-	// 新窗口请求处理
-	w.OnNewWindowRequested(func(url string) bool {
-		log.Printf("检测到新窗口请求: %s", url)
-
-		// 根据 URL 决定打开方式
-		if strings.Contains(url, "html5test.com") {
-			// html5test.com 的链接在当前窗口打开
-			log.Printf("在当前窗口打开链接: %s", url)
-			return true
-		} else {
-			// 其他链接允许在新窗口打开
-			log.Printf("允许在新窗口打开链接: %s", url)
-			return false
-		}
-	})
-
-	// 添加一些测试链接到页面
-	w.Eval(`
-		(function() {
-			// 等待 DOM 完全加载
-			if (document.readyState === 'loading') {
-				document.addEventListener('DOMContentLoaded', addLinks);
-			} else {
-				addLinks();
-			}
-
-			function addLinks() {
-				// 检查是否已经添加过链接
-				if (document.getElementById('test-links-container')) {
-					return;
-				}
-
-				// 创建测试链接列表
-				const links = [
-					{ url: 'https://html5test.com/results.html', text: 'HTML5 Test Results (当前窗口打开)' },
-					{ url: 'https://www.google.com', text: 'Google (新窗口打开)' },
-					{ url: 'https://example.com', text: '示例链接 (当前窗口打开)' }
-				];
-
-				// 创建链接容器
-				const container = document.createElement('div');
-				container.id = 'test-links-container';
-				container.style.cssText = 'position: fixed; top: 10px; right: 10px; background: white; padding: 10px; border: 1px solid #ccc; border-radius: 5px; z-index: 9999;';
-				
-				// 添加标题
-				const title = document.createElement('h3');
-				title.textContent = '新窗口测试链接';
-				container.appendChild(title);
-
-				// 创建链接列表
-				const ul = document.createElement('ul');
-				links.forEach(link => {
-					const li = document.createElement('li');
-					const a = document.createElement('a');
-					a.href = link.url;
-					a.target = '_blank';
-					a.textContent = link.text;
-					// 移除点击事件处理，让 WebView2 直接处理新窗口请求
-					li.appendChild(a);
-					ul.appendChild(li);
-				});
-				container.appendChild(ul);
-
-				// 添加到页面
-				document.body.appendChild(container);
-			}
-		})();
-	`)
 
 	// 运行
 	w.Run()

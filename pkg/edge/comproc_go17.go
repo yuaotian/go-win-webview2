@@ -8,10 +8,10 @@ import "syscall"
 //go:uintptrescapes
 // Call calls a COM procedure.
 func (p ComProc) Call(a ...uintptr) (r1, r2 uintptr, lastErr error) {
-	// The magic uintptrescapes comment is needed to prevent moving uintptr(unsafe.Pointer(p)) so calls to .Call() also
-	// satisfy the unsafe.Pointer rule "(4) Conversion of a Pointer to a uintptr when calling syscall.Syscall."
-	// Otherwise it might be that pointers get moved, especially pointer onto the Go stack which might grow dynamically.
-	// See https://pkg.go.dev/unsafe#Pointer and https://github.com/golang/go/issues/34474
+	//需要神奇的 uintptrescapes 注释来防止移动 uintptr(unsafe.Pointer(p)) 因此也调用 .Call()
+	//满足 unsafe.Pointer 规则“(4) 在调用 syscall.Syscall 时将指针转换为 uintptr。”
+	//否则，指针可能会被移动，特别是 Go 堆栈上的指针可能会动态增长。
+	//请参阅 https://pkg.go.dev/unsafe#Pointer 和 https://github.com/golang/go/issues/34474
 	switch len(a) {
 	case 0:
 		return syscall.Syscall(uintptr(p), 0, 0, 0, 0)

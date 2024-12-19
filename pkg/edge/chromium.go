@@ -6,10 +6,11 @@ package edge
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -17,12 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// 定义一个导航请求结构
-type NavigationRequest struct {
-	URL  string
-	Done chan struct{}
-}
-
+// Chromium 结构体定义
 type Chromium struct {
 	hwnd                  uintptr
 	focusOnInit           bool
@@ -36,7 +32,6 @@ type Chromium struct {
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
 	navigationCompleted   *ICoreWebView2NavigationCompletedEventHandler
-	newWindowRequested    *iCoreWebView2NewWindowRequestedEventHandler
 
 	environment *ICoreWebView2Environment
 
@@ -52,19 +47,36 @@ type Chromium struct {
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
-	NewWindowRequestedCallback   func(url string) bool
 	NavigationStartingCallback   func()
+
+	// 状态管理
+	state struct {
+		isLoading    bool
+		currentURL   string
+		currentTitle string
+		isFullscreen bool
+		sync.RWMutex
+	}
+
+	// 状态变化回调
+	callbacks struct {
+		onLoadingStateChanged func(bool)
+		onURLChanged          func(string)
+		onTitleChanged        func(string)
+		onFullscreenChanged   func(bool)
+		sync.RWMutex
+	}
 }
 
 func NewChromium() *Chromium {
 	e := &Chromium{}
 
 	/*
-	   	 所有这些处理程序都通过带有"uintptr(unsafe.Pointer(handler))"的系统调用传递给本机代码，我们知道
+	   	 所有这处理程序都通过带有"uintptr(unsafe.Pointer(handler))"的系统调用传递给本机代码，我们知道
 	   	 指向这些的指针将保留在本机代码中。此外，这些处理程序还包含指向其他 Go 的指针
-	   	 像 vtable 这样的结构。
+	   	 vtable 这样的结构。
 	   	 这违反了 unsafe.Pointer 规则"(4) 在调用 syscall.Syscall 时将指针转换为 uintptr"。因为
-	   	 无法保证 Go 不会移动这些对象。
+	   	 无法保证 Go 不会���动这些对象。
 	   据我所前 Go 运行时不会移动 HEAP 对象，因此我们使用这些处理程序应该是安全的。但他们不
 	   	 保证它，因为Go 可能使用压缩 GC。
 	   	 有人建议添加一个runtime.Pin函数，以防止移动固定对象，这将允许轻松修复
@@ -77,7 +89,6 @@ func NewChromium() *Chromium {
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
-	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
 	return e
@@ -127,6 +138,7 @@ func (e *Chromium) Embed(hwnd uintptr) bool {
 	return true
 }
 
+// 导航URL
 func (e *Chromium) Navigate(url string) {
 	_, _, _ = e.webview.vtbl.Navigate.Call(
 		uintptr(unsafe.Pointer(e.webview)),
@@ -134,6 +146,7 @@ func (e *Chromium) Navigate(url string) {
 	)
 }
 
+// NavigateToString 将 HTML 内容注入到 WebView 中
 func (e *Chromium) NavigateToString(htmlContent string) {
 	_, _, _ = e.webview.vtbl.NavigateToString.Call(
 		uintptr(unsafe.Pointer(e.webview)),
@@ -142,18 +155,13 @@ func (e *Chromium) NavigateToString(htmlContent string) {
 }
 
 func (e *Chromium) Init(script string) {
-	baseScript := `
-		window.webview2 = {
-			navigate: function(url) {
-				window.chrome.webview.postMessage(JSON.stringify({
-					type: 'navigate',
-					url: url
-				}));
-			}
-		};
-	`
+	baseScript := `console.log('hello world')`
+
 	// 合并脚本
-	fullScript := baseScript + script
+	fullScript := baseScript
+	if script != "" {
+		fullScript += ";" + script
+	}
 
 	_, _, _ = e.webview.vtbl.AddScriptToExecuteOnDocumentCreated.Call(
 		uintptr(unsafe.Pointer(e.webview)),
@@ -243,11 +251,6 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 	_, _, _ = e.webview.vtbl.AddNavigationCompleted.Call(
 		uintptr(unsafe.Pointer(e.webview)),
 		uintptr(unsafe.Pointer(e.navigationCompleted)),
-		uintptr(unsafe.Pointer(&token)),
-	)
-	_, _, _ = e.webview.vtbl.AddNewWindowRequested.Call(
-		uintptr(unsafe.Pointer(e.webview)),
-		uintptr(unsafe.Pointer(e.newWindowRequested)),
 		uintptr(unsafe.Pointer(&token)),
 	)
 
@@ -362,6 +365,10 @@ func (e *Chromium) GetController() *ICoreWebView2Controller {
 }
 
 func (e *Chromium) NavigationCompleted(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs) uintptr {
+	e.updateState(func(c *Chromium) {
+		c.state.isLoading = false
+	})
+
 	if e.NavigationCompletedCallback != nil {
 		e.NavigationCompletedCallback(sender, args)
 	}
@@ -413,7 +420,7 @@ func (e *Chromium) PrintToPDF(path string) error {
 
 // 添加打印相关的回调处理
 func (e *Chromium) handlePrintCompleted(success bool, errorCode int) {
-	// 处理打印成事件
+	// 处理打印成件
 	if !success {
 		log.Printf("Print failed with error code: %d", errorCode)
 	}
@@ -437,84 +444,13 @@ func (e *Chromium) EnableContextMenu() error {
 	}
 }
 
-func (e *Chromium) NewWindowRequested(_ *ICoreWebView2, args *iCoreWebView2NewWindowRequestedEventArgs) uintptr {
-	// 参数验证
-	if args == nil || args.vtbl == nil {
-		log.Printf("NewWindowRequested: 无效的参数")
-		return 0
-	}
-
-	// 获取 Deferral 对象以异步处理
-	var deferral *ICoreWebView2Deferral
-	ret, _, _ := args.vtbl.GetDeferral.Call(
-		uintptr(unsafe.Pointer(args)),
-		uintptr(unsafe.Pointer(&deferral)),
-	)
-
-	// 确保 deferral 被正确释放
-	if deferral != nil {
-		defer deferral.vtbl.Complete.Call(uintptr(unsafe.Pointer(deferral)))
-	}
-
-	// 获取请求的 URL
-	var uri *uint16
-	ret, _, _ = args.vtbl.GetUri.Call(
-		uintptr(unsafe.Pointer(args)),
-		uintptr(unsafe.Pointer(&uri)),
-	)
-
-	if ret != 0 || uri == nil {
-		log.Printf("NewWindowRequested: 获取 URL 失败")
-		return 0
-	}
-
-	// 确保释放内存
-	defer windows.CoTaskMemFree(unsafe.Pointer(uri))
-
-	url := windows.UTF16PtrToString(uri)
-	if url == "" {
-		return 0
-	}
-
-	// 如果没有回调函数,使用默认行为
-	if e.NewWindowRequestedCallback == nil {
-		return 0
-	}
-
-	// 调用回调函数并处理结果
-	handled := e.NewWindowRequestedCallback(url)
-
-	if handled {
-		// 在当前窗口中打开
-		if args != nil && args.vtbl != nil {
-			_, _, _ = args.vtbl.PutHandled.Call(
-				uintptr(unsafe.Pointer(args)),
-				uintptr(1),
-			)
-		}
-
-		// 使用当前 webview 导航到新 URL
-		e.Navigate(url)
-	}
-
-	return 0
-}
-
-// boolToInt 将 bool 转换为 uintptr，用于 Windows API 调用
-func boolToInt(b bool) uintptr {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // Dispatch 在主线程中执行函数
 func (e *Chromium) Dispatch(f func()) {
 	if e.webview == nil {
 		return
 	}
 
-	// 创建一个通道来同步执行
+	// 创建个通道来同步执行
 	done := make(chan struct{})
 
 	go func() {
@@ -544,10 +480,11 @@ func (e *Chromium) Dispatch(f func()) {
 	}
 }
 
+// HandleWebMessage 处理来自 WebView 的消息
 func (e *Chromium) HandleWebMessage(message string) {
 	var msg struct {
-		Type string `json:"type"`
-		URL  string `json:"url"`
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
 	}
 
 	if err := json.Unmarshal([]byte(message), &msg); err != nil {
@@ -557,17 +494,85 @@ func (e *Chromium) HandleWebMessage(message string) {
 
 	switch msg.Type {
 	case "navigate":
-		// 直接使用 ExecuteScript 进行导航
-		script := fmt.Sprintf(`window.location.href = "%s";`, msg.URL)
-		_, _, _ = e.webview.vtbl.ExecuteScript.Call(
-			uintptr(unsafe.Pointer(e.webview)),
-			uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(script))),
-			0,
-		)
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			log.Printf("Failed to parse navigate payload: %v", err)
+			return
+		}
+		e.Navigate(payload.URL)
+
+	case "stateChange":
+		var payload struct {
+			Loading bool   `json:"loading"`
+			URL     string `json:"url"`
+			Title   string `json:"title"`
+		}
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			log.Printf("Failed to parse state change payload: %v", err)
+			return
+		}
+		e.updateState(func(c *Chromium) {
+			c.state.isLoading = payload.Loading
+			c.state.currentURL = payload.URL
+			c.state.currentTitle = payload.Title
+		})
 	}
 }
 
 // 添加消息处理回调设置方法
 func (e *Chromium) SetMessageCallback(callback func(string)) {
 	e.MessageCallback = callback
+}
+
+// 加状态管理方法
+func (e *Chromium) updateState(update func(*Chromium)) {
+	e.state.Lock()
+	defer e.state.Unlock()
+
+	// 记录更新前的状态
+	oldURL := e.state.currentURL
+	oldTitle := e.state.currentTitle
+	oldFullscreen := e.state.isFullscreen
+
+	// 执行更新
+	update(e)
+
+	// 触发相应调
+	e.callbacks.RLock()
+	defer e.callbacks.RUnlock()
+
+	// 触发加载状态变化回调
+	if e.callbacks.onLoadingStateChanged != nil {
+		e.callbacks.onLoadingStateChanged(e.state.isLoading)
+	}
+
+	// 触发 URL 变化回调
+	if e.callbacks.onURLChanged != nil && oldURL != e.state.currentURL {
+		e.callbacks.onURLChanged(e.state.currentURL)
+	}
+
+	// 触发标题变化回调
+	if e.callbacks.onTitleChanged != nil && oldTitle != e.state.currentTitle {
+		e.callbacks.onTitleChanged(e.state.currentTitle)
+	}
+
+	// 触发全屏状态变化回调
+	if e.callbacks.onFullscreenChanged != nil && oldFullscreen != e.state.isFullscreen {
+		e.callbacks.onFullscreenChanged(e.state.isFullscreen)
+	}
+}
+
+// 设置导航开始回调
+func (e *Chromium) SetNavigationStartingCallback(callback func()) {
+	e.NavigationStartingCallback = callback
+}
+
+// boolToInt 将 bool 转换为 uintptr
+func boolToInt(b bool) uintptr {
+	if b {
+		return 1
+	}
+	return 0
 }

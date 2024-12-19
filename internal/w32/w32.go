@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"syscall"
 )
 
 var (
@@ -249,6 +250,23 @@ type Msg struct {
 }
 
 type Handle = windows.Handle
+
+// IUnknown COM 接口
+type IUnknown struct {
+	vtbl *struct {
+		QueryInterface uintptr
+		AddRef        uintptr
+		Release       uintptr
+	}
+}
+
+func (u *IUnknown) Release() uint32 {
+	if u == nil || u.vtbl == nil {
+		return 0
+	}
+	ret, _, _ := syscall.Syscall(u.vtbl.Release, 1, uintptr(unsafe.Pointer(u)), 0, 0)
+	return uint32(ret)
+}
 
 func Utf16PtrToString(p *uint16) string {
 	if p == nil {

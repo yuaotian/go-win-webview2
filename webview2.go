@@ -78,9 +78,6 @@ type webview struct {
 	wsHandler     WebSocketHandler
 	wsConnections sync.Map
 
-	// 新窗口请求回调
-	onNewWindowRequested func(url string) bool // 返回 true 表示在当前窗口打开，false 表示允许新窗口
-
 	// 用于处理导航的通道
 	navigationChan chan string
 
@@ -102,7 +99,7 @@ type WindowOptions struct {
 	Maximizable        bool    // 是否可最大化
 	Minimized          bool    // 初始是否最小化
 	Maximized          bool    // 初始是否最大化
-	DisableContextMenu bool    // 是否禁用右键菜单
+	DisableContextMenu bool    // 是否禁用右键���单
 	EnableDragAndDrop  bool    // 是否启用拖放
 	HideWindowOnClose  bool    // 关闭时是否隐藏窗口而不是退出
 	DefaultBackground  string  // 默认背景色 (CSS 格式，如 "#FFFFFF")
@@ -148,7 +145,7 @@ type WebViewOptions struct {
 	WindowOptions WindowOptions
 }
 
-// New 在新窗口中创建一个新的 webview。
+// New 在新窗口中创建个新的 webview。
 func New(debug bool) WebView {
 	return NewWithOptions(WebViewOptions{Debug: debug})
 
@@ -212,8 +209,11 @@ func NewWithOptions(options WebViewOptions) WebView {
 
 	settings, err := chromium.GetSettings()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Warning: Failed to get settings: %v", err)
+		return nil
 	}
+
+	
 	//禁用上下文菜单
 	err = settings.PutAreDefaultContextMenusEnabled(options.Debug)
 	if err != nil {
@@ -404,7 +404,7 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 				return w32.HTRight
 			}
 
-			// 允许动窗口
+			// 允许窗口
 			return w32.HTCaption
 
 		case w32.WMLButtonDown:
@@ -1442,37 +1442,6 @@ func (w *webview) SendWebSocketMessage(message string) {
 		}
 		return true
 	})
-}
-
-// OnNewWindowRequested 设置新窗口请求的处理回调
-// callback 返回 true 表示在当前窗口打开,false 表示允许在新窗口打开
-func (w *webview) OnNewWindowRequested(callback func(url string) bool) {
-	if w.browser == nil {
-		return
-	}
-
-	if chromium, ok := w.browser.(*edge.Chromium); ok {
-		chromium.NewWindowRequestedCallback = func(url string) bool {
-			if callback == nil {
-				return false // 默认允许新窗口
-			}
-
-			// 添加 recover 以防止回调中的 panic
-			var result bool
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("NewWindowRequested 回调发生 panic: %v", r)
-						result = false // panic 时默认允许新窗口
-					}
-				}()
-				result = callback(url)
-			}()
-
-			return result
-		}
-	}
-	w.onNewWindowRequested = callback
 }
 
 func (w *webview) OnNavigationStarting(handler func()) {

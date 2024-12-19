@@ -79,3 +79,4 @@ func (i *ICoreWebView2AcceleratorKeyPressedEventArgs) PutHandled(handled bool) e
 	}
 	return nil
 }
+
