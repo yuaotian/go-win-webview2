@@ -65,7 +65,7 @@ type webview struct {
 	dispatchq  []func()
 	ctx        context.Context
 	hotkeys    map[int]HotKeyHandler
-	jsHooks    []JSHook  // JavaScript hooks
+	jsHooks    []JSHook // JavaScript hooks
 
 	// 状态听回调
 	onLoadingStateChanged func(bool)
@@ -73,48 +73,61 @@ type webview struct {
 	onTitleChanged        func(string)
 	onFullscreenChanged   func(bool)
 
-	wsServer     *http.Server
-	wsUpgrader   websocket.Upgrader
-	wsHandler    WebSocketHandler
+	wsServer      *http.Server
+	wsUpgrader    websocket.Upgrader
+	wsHandler     WebSocketHandler
 	wsConnections sync.Map
+
+	// 新窗口请求回调
+	onNewWindowRequested func(url string) bool // 返回 true 表示在当前窗口打开，false 表示允许新窗口
+
+	// 用于处理导航的通道
+	navigationChan chan string
+
+	// 消息回调
+	messageCallback func(string)
 }
 
 type WindowOptions struct {
-	Title       string // 窗口标题
-	Width       uint   // 窗口宽度
-	Height      uint   // 窗口高度
-	IconId      uint   // 图标ID
-	Center      bool   // 是否居中
-	Frameless   bool   // 是否无边框
-	Fullscreen  bool   // 是否全屏
-	AlwaysOnTop bool   // 是否置顶
-	Resizable   bool   // 是否可调整大小
-	Minimizable bool   // 是否可最小化
-	Maximizable bool   // 是否可最大化
-	DisableContextMenu bool // 是否禁用右键菜单
-	EnableDragAndDrop  bool // 是否启用拖放
-	HideWindowOnClose  bool // 关闭时是否隐藏窗口而不是退出
-	DefaultBackground  string // 默认背景色 (CSS 格式，如 "#FFFFFF")
-	Opacity float64 // 初始透明度 (0.0-1.0)
-	IconPath string // 图标文件路径
-	IconData []byte // 图标进制数据
+	Title              string  // 窗口标题
+	Width              uint    // 窗口宽度
+	Height             uint    // 窗口高度
+	IconId             uint    // 图标ID
+	Center             bool    // 是否居中
+	Frameless          bool    // 是否无边框
+	Fullscreen         bool    // 是否全屏
+	AlwaysOnTop        bool    // 是否置顶
+	Resizable          bool    // 是否可调整大小
+	Minimizable        bool    // 是否可最小化
+	Maximizable        bool    // 是否可最大化
+	Minimized          bool    // 初始是否最小化
+	Maximized          bool    // 初始是否最大化
+	DisableContextMenu bool    // 是否禁用右键菜单
+	EnableDragAndDrop  bool    // 是否启用拖放
+	HideWindowOnClose  bool    // 关闭时是否隐藏窗口而不是退出
+	DefaultBackground  string  // 默认背景色 (CSS 格式，如 "#FFFFFF")
+	Opacity            float64 // 初始透明度 (0.0-1.0)
+	IconPath           string  // 图标文件路径
+	IconData           []byte  // 图标二进制数据
 }
 
 // 添加默认配置
 func DefaultWindowOptions() WindowOptions {
 	return WindowOptions{
-		Title:       "WebView2",
-			Width:       800,
-			Height:      600,
-			Center:      true,
-			Resizable:   true,
-			Minimizable: true,
-			Maximizable: true,
-			DisableContextMenu: false,
-			EnableDragAndDrop: true,
-			HideWindowOnClose: false,
-			DefaultBackground: "#FFFFFF",
-			Opacity: 1.0, // 默认完全不透明
+		Title:              "WebView2",
+		Width:              800,
+		Height:             600,
+		Center:             true,
+		Resizable:          true,
+		Minimizable:        true,
+		Maximizable:        true,
+		Minimized:          false,
+		Maximized:          false,
+		DisableContextMenu: false,
+		EnableDragAndDrop:  true,
+		HideWindowOnClose:  false,
+		DefaultBackground:  "#FFFFFF",
+		Opacity:            1.0,
 	}
 }
 
@@ -136,9 +149,9 @@ type WebViewOptions struct {
 }
 
 // New 在新窗口中创建一个新的 webview。
-func New(debug bool) WebView { 
-	return NewWithOptions(WebViewOptions{Debug: debug}) 
-	
+func New(debug bool) WebView {
+	return NewWithOptions(WebViewOptions{Debug: debug})
+
 }
 
 // NewWindow 使用现有窗创一个新的 webview。
@@ -211,6 +224,13 @@ func NewWithOptions(options WebViewOptions) WebView {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// 设置默认消息处理
+	w.SetMessageCallback(func(msg string) {
+		if chromium, ok := w.browser.(*edge.Chromium); ok {
+			chromium.HandleWebMessage(msg)
+		}
+	})
 
 	return w
 }
@@ -355,7 +375,7 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			var rect w32.Rect
 			_, _, _ = w32.User32GetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rect)))
 
-			// 定义边框拖拽区域宽度
+			// 定义边框拖拽区宽度
 			const borderWidth = 5
 
 			// 检查是否在拖拽域内
@@ -396,7 +416,7 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 			w.m.Lock()
 			if handler, ok := w.hotkeys[int(wp)]; ok {
 				w.m.Unlock()
-					handler()
+				handler()
 			} else {
 				w.m.Unlock()
 			}
@@ -465,22 +485,33 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		posY = w32.CW_USEDEFAULT
 	}
 
-	// 添加分层窗口样式以支持透明度
-	style := w32.WSOverlappedWindow
+	// 修改窗口样式设置
+	var style uint32 = w32.WSOverlappedWindow
 	if opts.Frameless {
 		style = w32.WSPopup | w32.WSVisible
+	} else {
+		// 根据选项调整窗样式
+		if !opts.Maximizable {
+			style &^= w32.WSMaximizeBox
+		}
+		if !opts.Minimizable {
+			style &^= w32.WSMinimizeBox
+		}
+		if !opts.Resizable {
+			style &^= w32.WSThickFrame
+		}
 	}
-	
+
 	// 添加分层窗口扩展样式
-	exStyle := w32.WS_EX_LAYERED
-	
+	var exStyle uint32 = w32.WS_EX_LAYERED
+
 	w.hwnd, _, _ = w32.User32CreateWindowExW.Call(
-		uintptr(exStyle), // 使用扩展样式
+		uintptr(exStyle),
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowName)),
 		uintptr(style),
 		uintptr(posX),
-		uintptr(posY), 
+		uintptr(posY),
 		uintptr(windowWidth),
 		uintptr(windowHeight),
 		0,
@@ -488,7 +519,7 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		uintptr(hinstance),
 		0,
 	)
-	
+
 	// 设置初始透明度(默认完全不透明)
 	_, _, _ = w32.User32SetLayeredWindowAttributes.Call(
 		w.hwnd,
@@ -546,11 +577,18 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 		`)
 	}
 
+	// 设置初始窗口状态
+	if opts.Maximizable && opts.Maximized {
+		w.Maximize()
+	} else if opts.Minimizable && opts.Minimized {
+		w.Minimize()
+	}
+
 	return true
 }
 
 func (w *webview) Destroy() {
-	// 注销所有热键
+	// 注所有热键
 	w.m.Lock()
 	for id := range w.hotkeys {
 		_, _, _ = w32.User32UnregisterHotKey.Call(w.hwnd, uintptr(id))
@@ -629,9 +667,13 @@ func (w *webview) SetSize(width int, height int, hints Hint) {
 	index := w32.GWLStyle
 	style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(index))
 	if hints == HintFixed {
-		style &^= (w32.WSThickFrame | w32.WSMaximizeBox)
+		styleUint32 := uint32(style)
+		styleUint32 &^= (w32.WSThickFrame | w32.WSMaximizeBox)
+		style = uintptr(styleUint32)
 	} else {
-		style |= (w32.WSThickFrame | w32.WSMaximizeBox)
+		styleUint32 := uint32(style)
+		styleUint32 |= (w32.WSThickFrame | w32.WSMaximizeBox)
+		style = uintptr(styleUint32)
 	}
 	_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(index), style)
 
@@ -647,9 +689,14 @@ func (w *webview) SetSize(width int, height int, hints Hint) {
 		r.Top = 0
 		r.Right = int32(width)
 		r.Bottom = int32(height)
-		_, _, _ = w32.User32AdjustWindowRect.Call(uintptr(unsafe.Pointer(&r)), w32.WSOverlappedWindow, 0)
+		_, _, _ = w32.User32AdjustWindowRect.Call(
+			uintptr(unsafe.Pointer(&r)),
+			uintptr(w32.WSOverlappedWindow),
+			0,
+		)
 		_, _, _ = w32.User32SetWindowPos.Call(
-			w.hwnd, 0, uintptr(r.Left), uintptr(r.Top), uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
+			w.hwnd, 0, uintptr(r.Left), uintptr(r.Top),
+			uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
 			w32.SWP_NOZORDER|w32.SWP_NOACTIVATE|w32.SWP_NOMOVE|w32.SWP_FRAMECHANGED)
 		w.browser.Resize()
 	}
@@ -657,18 +704,37 @@ func (w *webview) SetSize(width int, height int, hints Hint) {
 
 // 初始化(加载之前注入js，永久注入)
 func (w *webview) Init(js string) {
-	w.browser.Init(js)
+	// 添加 webview2 导航功能
+	baseScript := `
+		window.webview2 = {
+			navigate: function(url) {
+				window.chrome.webview.postMessage(JSON.stringify({
+					type: 'navigate',
+					url: url
+				}));
+			}
+		};
+	`
+
+	// 合并脚本
+	fullScript := baseScript
+	if js != "" {
+		fullScript += ";" + js
+	}
+
+	// 初始化浏览器
+	w.browser.Init(fullScript)
 }
 
 // 执行JS(加载之后注入js，临时注入)
 func (w *webview) Eval(js string) {
 	// 应用前置钩子
 	js = w.processScript(js, JSHookBefore)
-	
+
 	w.Dispatch(func() {
 		w.browser.Eval(js)
 	})
-	
+
 	// 应用后置钩子
 	js = w.processScript(js, JSHookAfter)
 }
@@ -720,7 +786,7 @@ func (w *webview) loadWindowIcon(hinstance windows.Handle, iconId uint, opts Win
 		icon, _, _ := w32.User32CreateIconFromResourceEx.Call(
 			uintptr(unsafe.Pointer(&opts.IconData[0])),
 			uintptr(len(opts.IconData)),
-			1, // IMAGE_ICON
+			1,          // IMAGE_ICON
 			0x00030000, // 版本
 			0, 0,
 			w32.LR_DEFAULTSIZE,
@@ -760,13 +826,13 @@ func (w *webview) loadWindowIcon(hinstance windows.Handle, iconId uint, opts Win
 		}
 	}
 
-	// 4. 最后使用默认图标
+	// 4. 最后使用默认标
 	icow, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCxIcon)
 	icoh, _, _ := w32.User32GetSystemMetrics.Call(w32.SystemMetricsCyIcon)
 	icon, _, _ := w32.User32LoadImageW.Call(
 		0,
 		32512, // IDI_APPLICATION
-		1, // IMAGE_ICON
+		1,     // IMAGE_ICON
 		icow,
 		icoh,
 		w32.LR_SHARED,
@@ -793,7 +859,7 @@ func (w *webview) RegisterHotKey(modifiers int, keyCode int, handler HotKeyHandl
 	w.m.Lock()
 	defer w.m.Unlock()
 
-	// 化热键映
+	// 化键映
 	if w.hotkeys == nil {
 		w.hotkeys = make(map[int]HotKeyHandler)
 	}
@@ -849,20 +915,18 @@ func (w *webview) RegisterHotKeyString(hotkey string, handler HotKeyHandler) err
 // SetFullscreen 设置窗口全屏状态
 func (w *webview) SetFullscreen(enable bool) {
 	if enable {
-		// 保存前窗口位置和大小用于还原
 		var rect w32.Rect
 		_, _, _ = w32.User32GetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rect)))
 
-		// 获取主显示器的完整尺寸（包括任务栏
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
 		screenHeight, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CYSCREEN)
 
-		// 移除窗口边框样式
-		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF))
-		style &^= w32.WSOverlappedWindow
-		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF), style)
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle&0xFFFFFFFF))
+		styleUint32 := uint32(style)
+		styleUint32 &^= w32.WSOverlappedWindow
+		style = uintptr(styleUint32)
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle&0xFFFFFFFF), style)
 
-		// 设置全屏 - 使用整个屏幕尺寸
 		_, _, _ = w32.User32SetWindowPos.Call(
 			w.hwnd,
 			uintptr(w32.HWND_TOP),
@@ -873,21 +937,20 @@ func (w *webview) SetFullscreen(enable bool) {
 			w32.SWP_FRAMECHANGED,
 		)
 	} else {
-		// 获取当前窗口样式
-		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF))
-		
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle&0xFFFFFFFF))
+		styleUint32 := uint32(style)
+
 		// 检查是否为无边框窗口
-		isFrameless := (style & w32.WSPopup) != 0
-		
+		isFrameless := (styleUint32 & w32.WSPopup) != 0
+
 		if !isFrameless {
-			// 如果不是无边框窗口，恢复普通窗口样式
-			style |= w32.WSOverlappedWindow
+			styleUint32 |= w32.WSOverlappedWindow
 		} else {
-			// 如果是无边框窗口，保持 WSPopup 样式
-			style = w32.WSPopup | w32.WSVisible
+			styleUint32 = w32.WSPopup | w32.WSVisible
 		}
-		
-		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle & 0xFFFFFFFF), style)
+
+		style = uintptr(styleUint32)
+		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, uintptr(w32.GWLStyle&0xFFFFFFFF), style)
 
 		// 获取屏幕尺寸
 		screenWidth, _, _ := w32.User32GetSystemMetrics.Call(w32.SM_CXSCREEN)
@@ -897,7 +960,7 @@ func (w *webview) SetFullscreen(enable bool) {
 		width := uintptr(1024)
 		height := uintptr(768)
 
-		// 计算居中位置
+		// 计算居中置
 		x := (screenWidth - width) / 2
 		y := (screenHeight - height) / 2
 
@@ -913,14 +976,14 @@ func (w *webview) SetFullscreen(enable bool) {
 		)
 	}
 	w.browser.Resize()
-	
-	// 触发全屏状态改变回调
+
+	// 触发屏状态改变回调
 	if w.onFullscreenChanged != nil {
 		w.onFullscreenChanged(enable)
 	}
 }
 
-// SetAlwaysOnTop 设置窗口置顶状态
+// SetAlwaysOnTop 设置窗口置顶状
 func (w *webview) SetAlwaysOnTop(enable bool) {
 	flag := w32.HWND_NOTOPMOST
 	if enable {
@@ -987,27 +1050,27 @@ func (w *webview) SetOpacity(opacity float64) {
 		opacity = 0
 	}
 	if opacity > 1 {
-		opacity = 1 
+		opacity = 1
 	}
-	
+
 	w.Dispatch(func() {
 		// 确保窗口有分层属性
-		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15))  // 使用 ^uintptr(15) 替代 GWL_EXSTYLE
+		style, _, _ := w32.User32GetWindowLongPtrW.Call(w.hwnd, ^uintptr(15)) // 使用 ^uintptr(15) 替代 GWL_EXSTYLE
 		style |= w32.WS_EX_LAYERED
-		
+
 		_, _, _ = w32.User32SetWindowLongPtrW.Call(w.hwnd, ^uintptr(15), style)
-		
+
 		// 设置透明度
 		_, _, _ = w32.User32SetLayeredWindowAttributes.Call(
 			w.hwnd,
 			0,
-			uintptr(opacity * 255),
+			uintptr(opacity*255),
 			w32.LWA_ALPHA,
 		)
 	})
 }
 
-// 浏览器相关功能
+// 浏览器相关能
 func (w *webview) Reload() {
 	w.Eval("window.location.reload();")
 }
@@ -1096,7 +1159,7 @@ func (w *webview) Print() {
 	w.Eval(`window.print()`)
 }
 
-// PrintToPDF 将当前页面打印到 PDF 文件
+// PrintToPDF 将当前页面打印为 PDF 文件
 func (w *webview) PrintToPDF(path string) {
 	// 使用 WebView2 的 PrintToPdf 方法
 	if w.browser != nil {
@@ -1112,23 +1175,15 @@ func (w *webview) ShowPrintDialog() {
 }
 
 // DisableContextMenu 禁用右键菜单
-func (w *webview) DisableContextMenu() {
-	// 通过 JavaScript 禁用右键菜单
-	w.Eval(`
-		document.addEventListener('contextmenu', function(e) {
-			e.preventDefault();
-			return false;
-		}, true);
-	`)
-	
-	// 同时设置 WebView2 的默认上下文菜单
+func (w *webview) DisableContextMenu() error {
 	if w.browser != nil {
-		_ = w.browser.DisableContextMenu()
+		return w.browser.DisableContextMenu()
 	}
+	return nil
 }
 
 // EnableContextMenu 启用右键菜单
-func (w *webview) EnableContextMenu() {
+func (w *webview) EnableContextMenu() error {
 	// 移除 JavaScript 的右键菜单禁用
 	w.Eval(`
 		document.removeEventListener('contextmenu', function(e) {
@@ -1136,11 +1191,12 @@ func (w *webview) EnableContextMenu() {
 			return false;
 		}, true);
 	`)
-	
+
 	// 同时恢复 WebView2 的默认上下文菜单
 	if w.browser != nil {
-		_ = w.browser.EnableContextMenu()
+		return w.browser.EnableContextMenu()
 	}
+	return nil
 }
 
 // RunAsync 异步运行 webview
@@ -1181,7 +1237,7 @@ func (w *webview) RunAsync() {
 				w.m.Unlock()
 			}
 
-			// 处理常规窗口消息
+			// 理常规窗口消息
 			_, _, _ = w32.User32TranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 			_, _, _ = w32.User32DispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 		}
@@ -1214,7 +1270,7 @@ func (w *webview) SetMinimized(enable bool) {
 func (w *webview) AddJSHook(hook JSHook) {
 	w.m.Lock()
 	defer w.m.Unlock()
-	
+
 	// 按优先级插入
 	inserted := false
 	for i, h := range w.jsHooks {
@@ -1234,7 +1290,7 @@ func (w *webview) AddJSHook(hook JSHook) {
 func (w *webview) RemoveJSHook(hook JSHook) {
 	w.m.Lock()
 	defer w.m.Unlock()
-	
+
 	for i, h := range w.jsHooks {
 		if h == hook {
 			w.jsHooks = append(w.jsHooks[:i], w.jsHooks[i+1:]...)
@@ -1254,7 +1310,7 @@ func (w *webview) ClearJSHooks() {
 func (w *webview) processScript(script string, hookType JSHookType) string {
 	w.m.Lock()
 	defer w.m.Unlock()
-	
+
 	result := script
 	for _, hook := range w.jsHooks {
 		if hook.Type() == hookType {
@@ -1281,35 +1337,35 @@ func (w *webview) EnableWebSocket(port int) error {
 		}
 
 		// 保存连接
-			connID := fmt.Sprintf("%p", conn)
-			w.wsConnections.Store(connID, conn)
+		connID := fmt.Sprintf("%p", conn)
+		w.wsConnections.Store(connID, conn)
 
-			// 创建并添加 WebSocket Hook
-			wsHook := NewWebSocketHook(conn)
-			w.AddJSHook(wsHook)
+		// 创建并添加 WebSocket Hook
+		wsHook := NewWebSocketHook(conn)
+		w.AddJSHook(wsHook)
 
-			// 处理消息
-			go func() {
-				defer func() {
-					conn.Close()
-					w.wsConnections.Delete(connID)
-					w.RemoveJSHook(wsHook)
-				}()
-
-				for {
-					_, message, err := conn.ReadMessage()
-					if err != nil {
-						if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-							log.Printf("WebSocket read error: %v", err)
-						}
-						return
-					}
-
-					if w.wsHandler != nil {
-						w.wsHandler(string(message))
-					}
-				}
+		// 处理消息
+		go func() {
+			defer func() {
+				conn.Close()
+				w.wsConnections.Delete(connID)
+				w.RemoveJSHook(wsHook)
 			}()
+
+			for {
+				_, message, err := conn.ReadMessage()
+				if err != nil {
+					if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+						log.Printf("WebSocket read error: %v", err)
+					}
+					return
+				}
+
+				if w.wsHandler != nil {
+					w.wsHandler(string(message))
+				}
+			}
+		}()
 	})
 
 	// 启动 WebSocket 服务器
@@ -1386,4 +1442,55 @@ func (w *webview) SendWebSocketMessage(message string) {
 		}
 		return true
 	})
+}
+
+// OnNewWindowRequested 设置新窗口请求的处理回调
+// callback 返回 true 表示在当前窗口打开,false 表示允许在新窗口打开
+func (w *webview) OnNewWindowRequested(callback func(url string) bool) {
+	if w.browser == nil {
+		return
+	}
+
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		chromium.NewWindowRequestedCallback = func(url string) bool {
+			if callback == nil {
+				return false // 默认允许新窗口
+			}
+
+			// 添加 recover 以防止回调中的 panic
+			var result bool
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("NewWindowRequested 回调发生 panic: %v", r)
+						result = false // panic 时默认允许新窗口
+					}
+				}()
+				result = callback(url)
+			}()
+
+			return result
+		}
+	}
+	w.onNewWindowRequested = callback
+}
+
+func (w *webview) OnNavigationStarting(handler func()) {
+	if w.browser != nil {
+		if chromium, ok := w.browser.(*edge.Chromium); ok {
+			chromium.NavigationStartingCallback = handler
+		}
+	}
+}
+
+func (w *webview) Browser() interface{} {
+	return w.browser
+}
+
+// 设置消息回调
+func (w *webview) SetMessageCallback(callback func(string)) {
+	w.messageCallback = callback
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		chromium.SetMessageCallback(callback)
+	}
 }

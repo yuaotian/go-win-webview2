@@ -125,24 +125,21 @@ const (
 )
 
 const (
-	WSOverlapped       = 0x00000000
-	WSMaximizeBox      = 0x00010000
-	WSThickFrame       = 0x00040000
-	WSCaption          = 0x00C00000
-	WSSysMenu          = 0x00080000
-	WSMinimizeBox      = 0x00020000
-	WSOverlappedWindow = (WSOverlapped | WSCaption | WSSysMenu | WSThickFrame | WSMinimizeBox | WSMaximizeBox)
+	WSOverlapped       uint32 = 0x00000000
+	WSMaximizeBox      uint32 = 0x00010000
+	WSThickFrame       uint32 = 0x00040000
+	WSCaption          uint32 = 0x00C00000
+	WSSysMenu          uint32 = 0x00080000
+	WSMinimizeBox      uint32 = 0x00020000
+	WSOverlappedWindow uint32 = (WSOverlapped | WSCaption | WSSysMenu | WSThickFrame | WSMinimizeBox | WSMaximizeBox)
+	WSPopup            uint32 = 0x80000000
+	WSVisible          uint32 = 0x10000000
 )
 
 const (
 	WAInactive    = 0
 	WAActive      = 1
 	WAActiveClick = 2
-)
-
-const (
-	WSPopup   = 0x80000000
-	WSVisible = 0x10000000
 )
 
 const (

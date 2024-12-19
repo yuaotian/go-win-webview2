@@ -1,5 +1,6 @@
 //go:build windows
 // +build windows
+
 package webview2
 
 import (
@@ -9,8 +10,8 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"github.com/gorilla/websocket"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 )
 
 // 错误定义
@@ -117,26 +118,31 @@ type WebView interface {
 	OnURLChanged(func(url string))               // URL 变化
 	OnTitleChanged(func(title string))           // 标题变化
 	OnFullscreenChanged(func(isFullscreen bool)) // 全屏状态变化
+	OnNewWindowRequested(func(url string) bool)  // 新窗口请求
+	OnNavigationStarting(func())                 // 导航开始
 
 	// 打印相关方法
-	Print()                    // 直接打印
-	PrintToPDF(path string)    // 打印到 PDF 文件
-	ShowPrintDialog()          // 显示打印对话框
+	Print()                 // 直接打印
+	PrintToPDF(path string) // 打印到 PDF 文件
+	ShowPrintDialog()       // 显示打印对话框
 
 	// 右键菜单控制
-	DisableContextMenu()    // 禁用右键菜单
-	EnableContextMenu()     // 启用右键菜单
+	DisableContextMenu() error // 禁用右键菜单
+	EnableContextMenu() error  // 启用右键菜单
 
 	// JavaScript Hook 相关方法
-	AddJSHook(hook JSHook)           // 添加 JS Hook
-	RemoveJSHook(hook JSHook)        // 移除 JS Hook
-	ClearJSHooks()                   // 清除所有 JS Hook
+	AddJSHook(hook JSHook)    // 添加 JS Hook
+	RemoveJSHook(hook JSHook) // 移除 JS Hook
+	ClearJSHooks()            // 清除所有 JS Hook
 
 	// WebSocket 相关方法
 	EnableWebSocket(port int) error              // 启用 WebSocket 服务
 	DisableWebSocket()                           // 禁用 WebSocket 服务
 	OnWebSocketMessage(handler WebSocketHandler) // 设置 WebSocket 消息处理器
 	SendWebSocketMessage(message string)         // 发送 WebSocket 消息
+
+	// 添加 Browser 方法
+	Browser() interface{}
 }
 
 // HotKey 表示一个键组合
@@ -222,15 +228,15 @@ func ParseHotKey(s string) (HotKey, error) {
 type JSHookType int
 
 const (
-	JSHookBefore JSHookType = iota  // JS 执行前
-	JSHookAfter                     // JS 执行后
+	JSHookBefore JSHookType = iota // JS 执行前
+	JSHookAfter                    // JS 执行后
 )
 
 // JSHook 定义 JavaScript 钩子接口
 type JSHook interface {
-	Type() JSHookType              // 获取 Hook 类型
-	Handle(script string) string   // 处理脚本
-	Priority() int                 // Hook 优先级，数字越小优先级越高
+	Type() JSHookType            // 获取 Hook 类型
+	Handle(script string) string // 处理脚本
+	Priority() int               // Hook 优先级，数字越小优先级越高
 }
 
 // BaseJSHook 提供基本的 JSHook 实现

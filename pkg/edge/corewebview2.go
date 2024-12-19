@@ -82,8 +82,8 @@ type iCoreWebView2Vtbl struct {
 	NavigateToString ComProc
 
 	// 导航事件处理
-	AddNavigationStarting      ComProc
-	RemoveNavigationStarting   ComProc
+	AddNavigationStarting     ComProc
+	RemoveNavigationStarting  ComProc
 	AddContentLoading         ComProc
 	RemoveContentLoading      ComProc
 	AddSourceChanged          ComProc
@@ -100,10 +100,10 @@ type iCoreWebView2Vtbl struct {
 	RemoveFrameNavigationCompleted ComProc
 
 	// 对话框和权限处理
-	AddScriptDialogOpening     ComProc
-	RemoveScriptDialogOpening  ComProc
-	AddPermissionRequested     ComProc
-	RemovePermissionRequested  ComProc
+	AddScriptDialogOpening    ComProc
+	RemoveScriptDialogOpening ComProc
+	AddPermissionRequested    ComProc
+	RemovePermissionRequested ComProc
 	AddProcessFailed          ComProc
 	RemoveProcessFailed       ComProc
 
@@ -114,9 +114,9 @@ type iCoreWebView2Vtbl struct {
 	CapturePreview                         ComProc
 
 	// 页面控制和消息通信
-	Reload                ComProc
-	PostWebMessageAsJSON  ComProc
-	PostWebMessageAsString ComProc
+	Reload                   ComProc
+	PostWebMessageAsJSON     ComProc
+	PostWebMessageAsString   ComProc
 	AddWebMessageReceived    ComProc
 	RemoveWebMessageReceived ComProc
 
@@ -133,16 +133,16 @@ type iCoreWebView2Vtbl struct {
 	Stop            ComProc
 
 	// 窗口和文档标题管理
-	AddNewWindowRequested     ComProc
-	RemoveNewWindowRequested  ComProc
-	AddDocumentTitleChanged   ComProc
+	AddNewWindowRequested      ComProc
+	RemoveNewWindowRequested   ComProc
+	AddDocumentTitleChanged    ComProc
 	RemoveDocumentTitleChanged ComProc
-	GetDocumentTitle          ComProc
+	GetDocumentTitle           ComProc
 
 	// 脚本对象和开发者工具
-	AddHostObjectToScript     ComProc
+	AddHostObjectToScript      ComProc
 	RemoveHostObjectFromScript ComProc
-	OpenDevToolsWindow        ComProc
+	OpenDevToolsWindow         ComProc
 
 	// 全屏元素控制
 	AddContainsFullScreenElementChanged    ComProc
@@ -150,9 +150,9 @@ type iCoreWebView2Vtbl struct {
 	GetContainsFullScreenElement           ComProc
 
 	// Web资源请求处理
-	AddWebResourceRequested       ComProc
-	RemoveWebResourceRequested    ComProc
-	AddWebResourceRequestedFilter ComProc
+	AddWebResourceRequested          ComProc
+	RemoveWebResourceRequested       ComProc
+	AddWebResourceRequestedFilter    ComProc
 	RemoveWebResourceRequestedFilter ComProc
 
 	// 窗口关闭处理
@@ -160,9 +160,9 @@ type iCoreWebView2Vtbl struct {
 	RemoveWindowCloseRequested ComProc
 
 	// 打印功能
-	PrintToPdf          ComProc
-	ShowPrintUI         ComProc
-	AddPrintCompleted   ComProc
+	PrintToPdf           ComProc
+	ShowPrintUI          ComProc
+	AddPrintCompleted    ComProc
 	RemovePrintCompleted ComProc
 }
 
@@ -446,4 +446,14 @@ func (i *ICoreWebView2) AddNavigationCompleted(eventHandler *ICoreWebView2Naviga
 
 type ICoreWebView2PrintCompletedHandler interface {
 	Invoke(errorCode int, printStatus int) uintptr
+}
+
+// ICoreWebView2Deferral 定义
+type ICoreWebView2Deferral struct {
+	vtbl *iCoreWebView2DeferralVtbl
+}
+
+type iCoreWebView2DeferralVtbl struct {
+	_IUnknownVtbl
+	Complete ComProc
 }

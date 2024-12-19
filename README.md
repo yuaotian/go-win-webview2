@@ -503,7 +503,7 @@ func bindWindowControls(w webview2.WebView, state *WindowState) {
 
         state.isMaximized = !state.isMaximized
         if state.isMaximized {
-            // 保存当前窗口位置和大���
+            // 保存当前窗口位置
             var rect w32.Rect
             w32.GetWindowRect(w32.Handle(w.Window()), &rect)
             state.lastX = int(rect.Left)
@@ -863,7 +863,7 @@ w.Init(`
         startPolling();
     }
     
-    // 存���API检测
+    // 存在API检测
     const storage = window.localStorage || {
         _data: {},
         setItem(id, val) { this._data[id] = val; },
