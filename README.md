@@ -113,7 +113,7 @@ go get github.com/yuaotian/go-win-webview2
 ```go
 package main
 
-import "github.com/yuaotian/go-win-webview2"
+import webview2 "github.com/yuaotian/go-win-webview2"
 
 func main() {
     w := webview2.NewWithOptions(webview2.WebViewOptions{
@@ -147,7 +147,7 @@ package main
 
 import (
     "log"
-    "github.com/yuaotian/go-win-webview2"
+    webview2 "github.com/yuaotian/go-win-webview2"
 )
 
 func main() {
