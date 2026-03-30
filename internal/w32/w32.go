@@ -277,6 +277,91 @@ func (u *IUnknown) Release() uint32 {
 	return uint32(ret)
 }
 
+type IStreamVtbl struct {
+	QueryInterface uintptr
+	AddRef         uintptr
+	Release        uintptr
+	Read           uintptr
+	Write          uintptr
+	Seek           uintptr
+	SetSize        uintptr
+	CopyTo         uintptr
+	Commit         uintptr
+	Revert         uintptr
+	LockRegion     uintptr
+	UnlockRegion   uintptr
+	Stat           uintptr
+	Clone          uintptr
+}
+
+type IStream struct {
+	vtbl *IStreamVtbl
+}
+
+func (s *IStream) AddRef() uint32 {
+	if s == nil || s.vtbl == nil {
+		return 0
+	}
+	ret, _, _ := syscall.Syscall(s.vtbl.AddRef, 1, uintptr(unsafe.Pointer(s)), 0, 0)
+	return uint32(ret)
+}
+
+func (s *IStream) Release() uint32 {
+	if s == nil || s.vtbl == nil {
+		return 0
+	}
+	ret, _, _ := syscall.Syscall(s.vtbl.Release, 1, uintptr(unsafe.Pointer(s)), 0, 0)
+	return uint32(ret)
+}
+
+func (s *IStream) Read(buffer []byte) (int, error) {
+	if s == nil || s.vtbl == nil {
+		return 0, syscall.EINVAL
+	}
+	if len(buffer) == 0 {
+		return 0, nil
+	}
+
+	var bytesRead uint32
+	hr, _, _ := syscall.Syscall6(
+		s.vtbl.Read,
+		4,
+		uintptr(unsafe.Pointer(s)),
+		uintptr(unsafe.Pointer(&buffer[0])),
+		uintptr(len(buffer)),
+		uintptr(unsafe.Pointer(&bytesRead)),
+		0,
+		0,
+	)
+	if int32(hr) < 0 {
+		return int(bytesRead), windows.Errno(hr)
+	}
+	return int(bytesRead), nil
+}
+
+func (s *IStream) Seek(offset int64, origin uint32) (uint64, error) {
+	if s == nil || s.vtbl == nil {
+		return 0, syscall.EINVAL
+	}
+
+	var newPosition uint64
+	offsetBits := *(*uintptr)(unsafe.Pointer(&offset))
+	hr, _, _ := syscall.Syscall6(
+		s.vtbl.Seek,
+		4,
+		uintptr(unsafe.Pointer(s)),
+		offsetBits,
+		uintptr(origin),
+		uintptr(unsafe.Pointer(&newPosition)),
+		0,
+		0,
+	)
+	if int32(hr) < 0 {
+		return 0, windows.Errno(hr)
+	}
+	return newPosition, nil
+}
+
 func Utf16PtrToString(p *uint16) string {
 	if p == nil {
 		return ""
@@ -304,18 +389,30 @@ func SHCreateMemStream(data []byte) (uintptr, error) {
 	return ret, nil
 }
 
+// SHCreateMemoryStream 使用内存缓冲构造 IStream，适合小响应或宿主自建二进制内容。
+func SHCreateMemoryStream(data []byte) (*IStream, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	raw, err := SHCreateMemStream(data)
+	if err != nil {
+		return nil, err
+	}
+	return (*IStream)(unsafe.Pointer(raw)), nil
+}
+
 // SHCreateReadFileStream 以只读方式打开文件流，适合 WebView2 资源响应等大文件场景。
-func SHCreateReadFileStream(path string) (*IUnknown, error) {
+func SHCreateReadFileStream(path string) (*IStream, error) {
 	return shCreateStreamOnFileEx(path, StgmRead|StgmShareDenyNone, windows.FILE_ATTRIBUTE_NORMAL, false)
 }
 
 // SHCreateWriteFileStream 以独占写入方式创建文件流，适合截图/导出等落盘场景。
-func SHCreateWriteFileStream(path string) (*IUnknown, error) {
+func SHCreateWriteFileStream(path string) (*IStream, error) {
 	return shCreateStreamOnFileEx(path, StgmCreate|StgmWrite|StgmShareExclusive, windows.FILE_ATTRIBUTE_NORMAL, true)
 }
 
-func shCreateStreamOnFileEx(path string, mode uint32, attributes uint32, create bool) (*IUnknown, error) {
-	var stream *IUnknown
+func shCreateStreamOnFileEx(path string, mode uint32, attributes uint32, create bool) (*IStream, error) {
+	var stream *IStream
 	createFlag := uintptr(0)
 	if create {
 		createFlag = 1

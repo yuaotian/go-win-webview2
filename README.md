@@ -825,6 +825,26 @@ w.OnWebResourceRequested(func(event *webview2.WebResourceRequestedEvent) {
 })
 ```
 
+#### raw Stream / 大文件响应
+```go
+stream, err := webview2.NewStreamFromFile("C:/replace/with/real/file.bin")
+if err != nil {
+    log.Fatal(err)
+}
+defer stream.Release()
+
+w.OnWebResourceRequested(func(event *webview2.WebResourceRequestedEvent) {
+    if event.URI == "https://app.local/big.bin" {
+        _ = event.SetStreamResponse(
+            stream,
+            200,
+            "OK",
+            "Content-Type: application/octet-stream\r\n",
+        )
+    }
+})
+```
+
 #### 虚拟主机映射 / DOMContentLoaded
 ```go
 w.OnDOMContentLoaded(func(event webview2.DOMContentLoadedEvent) {
@@ -851,6 +871,7 @@ _ = w.CapturePreviewWithOptions("preview.png", webview2.CapturePreviewOptions{
 为了不把原有基础 demo 塞得过于臃肿，新增高级能力示例建议查看：
 
 - `demo/advanced/advanced_demo.go`
+- `demo/desktop_control/desktop_control_demo.go`
 
 基础能力仍以：
 
@@ -1135,12 +1156,22 @@ func (app *Application) sendSecureMessage(payload interface{}) {
 | `OnNewWindowRequested(handler)` | 监听页面请求打开新窗口 |
 | `OnWindowCloseRequested(handler)` | 监听页面请求关闭窗口 |
 | `OnDOMContentLoaded(handler)` | 监听页面 DOMContentLoaded |
+| `OnContextMenuRequested(handler)` | 监听原生右键菜单请求 |
 
 ### 截图与预览
 | API | 描述 |
 |-----|------|
 | `CapturePreview(path)` | 截图当前视口到文件 |
 | `CapturePreviewWithOptions(path, options)` | 按选项截图到文件 |
+
+### 打印与流
+| API | 描述 |
+|-----|------|
+| `NewPrintSettings()` | 创建打印设置对象 |
+| `PrintToPDFWithSettings(path, settings, callback)` | 带设置导出 PDF |
+| `PrintToPDFStreamWithSettings(settings, callback)` | 导出 PDF 流 |
+| `NewStreamFromBytes(data)` | 从字节创建 Stream |
+| `NewStreamFromFile(path)` | 从文件创建 Stream |
 
 ### WebSocket相关
 | API | 描述 |
@@ -1238,6 +1269,17 @@ w.Init(`
   - 控制台打印 `拦截主文档请求`
   - 控制台打印 `拦截 API 请求`
   - 页面中出现请求返回的 JSON 结果
+
+5. `desktop_control_demo`
+
+验证方式：
+
+- 运行 `demo/desktop_control/desktop_control_demo.go`
+- 观察页面与右侧日志区域
+- 预期结果：
+  - 页面成功通过 `Stream` 读取 `https://app.local/stream.txt`
+  - 右键区域可看到宿主插入的 command / icon / checkbox / radio / submenu
+  - 点击 “导出 PDF” 和 “导出 PDF 流” 后，日志会反馈结果
 
 4. `CapturePreview / CapturePreviewWithOptions`
 

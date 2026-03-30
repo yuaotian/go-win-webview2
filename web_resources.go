@@ -48,6 +48,7 @@ type DOMContentLoadedEvent struct {
 type WebResourceResponse struct {
 	Content      []byte
 	FilePath     string
+	Stream       *Stream
 	StatusCode   int
 	ReasonPhrase string
 	Headers      string
@@ -67,8 +68,18 @@ func (e *WebResourceRequestedEvent) SetResponse(response WebResourceResponse) er
 		return errors.New("web resource event is not initialized")
 	}
 
-	if len(response.Content) > 0 && response.FilePath != "" {
-		return errors.New("web resource response content and file path cannot both be set")
+	sourceCount := 0
+	if len(response.Content) > 0 {
+		sourceCount++
+	}
+	if response.FilePath != "" {
+		sourceCount++
+	}
+	if response.Stream != nil {
+		sourceCount++
+	}
+	if sourceCount > 1 {
+		return errors.New("web resource response content, file path and stream can only set one source")
 	}
 
 	var (
@@ -78,6 +89,8 @@ func (e *WebResourceRequestedEvent) SetResponse(response WebResourceResponse) er
 	if response.FilePath != "" {
 		// 大文件/多媒体优先走文件 IStream，避免强制拷入 []byte。
 		webResourceResponse, err = e.env.CreateWebResourceResponseFromFile(response.FilePath, response.StatusCode, response.ReasonPhrase, response.Headers)
+	} else if response.Stream != nil {
+		webResourceResponse, err = e.env.CreateWebResourceResponseFromStream(response.Stream.cloneInner(), response.StatusCode, response.ReasonPhrase, response.Headers)
 	} else {
 		webResourceResponse, err = e.env.CreateWebResourceResponse(response.Content, response.StatusCode, response.ReasonPhrase, response.Headers)
 	}
@@ -93,6 +106,15 @@ func (e *WebResourceRequestedEvent) SetResponse(response WebResourceResponse) er
 func (e *WebResourceRequestedEvent) SetFileResponse(path string, statusCode int, reasonPhrase string, headers string) error {
 	return e.SetResponse(WebResourceResponse{
 		FilePath:     path,
+		StatusCode:   statusCode,
+		ReasonPhrase: reasonPhrase,
+		Headers:      headers,
+	})
+}
+
+func (e *WebResourceRequestedEvent) SetStreamResponse(stream *Stream, statusCode int, reasonPhrase string, headers string) error {
+	return e.SetResponse(WebResourceResponse{
+		Stream:       stream,
 		StatusCode:   statusCode,
 		ReasonPhrase: reasonPhrase,
 		Headers:      headers,

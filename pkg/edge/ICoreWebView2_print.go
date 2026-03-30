@@ -171,6 +171,21 @@ func (i *ICoreWebView2_16) Print(settings *ICoreWebView2PrintSettings, handler *
 	return nil
 }
 
+func (i *ICoreWebView2_16) PrintToPdfStream(settings *ICoreWebView2PrintSettings, handler *ICoreWebView2PrintToPdfStreamCompletedHandler) error {
+	hr, _, err := i.vtbl.PrintToPdfStream.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(settings)),
+		uintptr(unsafe.Pointer(handler)),
+	)
+	if int32(hr) < 0 {
+		return fmt.Errorf("print to pdf stream failed: %08x", hr)
+	}
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
 func (i *ICoreWebView2_16) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
 	hr, _, err := i.vtbl.ShowPrintUI.Call(
 		uintptr(unsafe.Pointer(i)),
@@ -292,6 +307,53 @@ var _ICoreWebView2PrintCompletedHandlerFn = _ICoreWebView2PrintCompletedHandlerV
 func newICoreWebView2PrintCompletedHandler(impl _ICoreWebView2PrintCompletedHandlerImpl) *ICoreWebView2PrintCompletedHandler {
 	return &ICoreWebView2PrintCompletedHandler{
 		vtbl: &_ICoreWebView2PrintCompletedHandlerFn,
+		impl: impl,
+	}
+}
+
+type _ICoreWebView2PrintToPdfStreamCompletedHandlerVtbl struct {
+	_IUnknownVtbl
+	Invoke ComProc
+}
+
+type ICoreWebView2PrintToPdfStreamCompletedHandler struct {
+	vtbl *_ICoreWebView2PrintToPdfStreamCompletedHandlerVtbl
+	impl _ICoreWebView2PrintToPdfStreamCompletedHandlerImpl
+}
+
+type _ICoreWebView2PrintToPdfStreamCompletedHandlerImpl interface {
+	_IUnknownImpl
+	PrintToPdfStreamCompleted(errorCode uintptr, stream uintptr) uintptr
+}
+
+func _ICoreWebView2PrintToPdfStreamCompletedHandlerIUnknownQueryInterface(this *ICoreWebView2PrintToPdfStreamCompletedHandler, refiid, object uintptr) uintptr {
+	return this.impl.QueryInterface(refiid, object)
+}
+
+func _ICoreWebView2PrintToPdfStreamCompletedHandlerIUnknownAddRef(this *ICoreWebView2PrintToPdfStreamCompletedHandler) uintptr {
+	return this.impl.AddRef()
+}
+
+func _ICoreWebView2PrintToPdfStreamCompletedHandlerIUnknownRelease(this *ICoreWebView2PrintToPdfStreamCompletedHandler) uintptr {
+	return this.impl.Release()
+}
+
+func _ICoreWebView2PrintToPdfStreamCompletedHandlerInvoke(this *ICoreWebView2PrintToPdfStreamCompletedHandler, errorCode uintptr, stream uintptr) uintptr {
+	return this.impl.PrintToPdfStreamCompleted(errorCode, stream)
+}
+
+var _ICoreWebView2PrintToPdfStreamCompletedHandlerFn = _ICoreWebView2PrintToPdfStreamCompletedHandlerVtbl{
+	_IUnknownVtbl{
+		NewComProc(_ICoreWebView2PrintToPdfStreamCompletedHandlerIUnknownQueryInterface),
+		NewComProc(_ICoreWebView2PrintToPdfStreamCompletedHandlerIUnknownAddRef),
+		NewComProc(_ICoreWebView2PrintToPdfStreamCompletedHandlerIUnknownRelease),
+	},
+	NewComProc(_ICoreWebView2PrintToPdfStreamCompletedHandlerInvoke),
+}
+
+func newICoreWebView2PrintToPdfStreamCompletedHandler(impl _ICoreWebView2PrintToPdfStreamCompletedHandlerImpl) *ICoreWebView2PrintToPdfStreamCompletedHandler {
+	return &ICoreWebView2PrintToPdfStreamCompletedHandler{
+		vtbl: &_ICoreWebView2PrintToPdfStreamCompletedHandlerFn,
 		impl: impl,
 	}
 }

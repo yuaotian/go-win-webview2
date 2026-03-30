@@ -207,14 +207,14 @@ type ICoreWebView2Environment struct {
 }
 
 func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
-	var stream *w32.IUnknown
+	var stream *w32.IStream
 	if len(content) > 0 {
 		// 小响应仍走内存流，保持现有接口兼容。
-		rawStream, err := w32.SHCreateMemStream(content)
+		rawStream, err := w32.SHCreateMemoryStream(content)
 		if err != nil {
 			return nil, err
 		}
-		stream = (*w32.IUnknown)(unsafe.Pointer(rawStream))
+		stream = rawStream
 	}
 	return e.CreateWebResourceResponseFromStream(stream, statusCode, reasonPhrase, headers)
 }
@@ -227,7 +227,7 @@ func (e *ICoreWebView2Environment) CreateWebResourceResponseFromFile(path string
 	return e.CreateWebResourceResponseFromStream(stream, statusCode, reasonPhrase, headers)
 }
 
-func (e *ICoreWebView2Environment) CreateWebResourceResponseFromStream(stream *w32.IUnknown, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
+func (e *ICoreWebView2Environment) CreateWebResourceResponseFromStream(stream *w32.IStream, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
 	// Convert string 'uri' to *uint16
 	_reason, err := windows.UTF16PtrFromString(reasonPhrase)
 	if err != nil {

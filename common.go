@@ -126,6 +126,7 @@ type WebView interface {
 	Print()                                                                     // 直接打印
 	PrintToPDF(path string)                                                     // 打印到 PDF 文件
 	PrintToPDFWithSettings(path string, settings *PrintSettings, callback func(PrintToPDFResult)) error // 带设置打印到 PDF
+	PrintToPDFStreamWithSettings(settings *PrintSettings, callback func(PrintToPDFStreamResult)) error // 带设置打印到 PDF 流
 	PrintWithSettings(settings *PrintSettings, callback func(PrintJobResult)) error // 带设置直接打印
 	ShowPrintDialog()                                                           // 显示打印对话框
 	ShowPrintDialogWithKind(kind PrintDialogKind) error                         // 按指定类型显示打印对话框

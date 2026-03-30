@@ -28,6 +28,7 @@ func main() {
 	var sawContextMenu atomic.Bool
 	var sawCustomInsert atomic.Bool
 	var sawPageTarget atomic.Bool
+	var sawExtendedItems atomic.Bool
 
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug: false,
@@ -63,6 +64,23 @@ func main() {
 			log.Printf("插入自定义菜单项失败: %v", err)
 		} else {
 			sawCustomInsert.Store(true)
+		}
+		if err := items.AppendCheckBox("smoke-checkbox", true, func() {
+			log.Printf("smoke-checkbox 被点击")
+		}); err != nil {
+			log.Printf("插入 checkbox 菜单项失败: %v", err)
+		} else if err := items.AppendRadio("smoke-radio", true, func() {
+			log.Printf("smoke-radio 被点击")
+		}); err != nil {
+			log.Printf("插入 radio 菜单项失败: %v", err)
+		} else if err := items.AppendSubMenu("smoke-submenu", nil, func(children *webview2.ContextMenuItemCollection) error {
+			return children.AppendCommand("submenu-command", func() {
+				log.Printf("submenu-command 被点击")
+			})
+		}); err != nil {
+			log.Printf("插入 submenu 菜单项失败: %v", err)
+		} else {
+			sawExtendedItems.Store(true)
 		}
 
 		// 自动化 smoke 只验证事件和自定义项插入链路，菜单本身不展示，避免阻塞。
@@ -101,6 +119,9 @@ func main() {
 		}
 		if !sawCustomInsert.Load() {
 			log.Fatal("未观察到自定义菜单项插入成功")
+		}
+		if !sawExtendedItems.Load() {
+			log.Fatal("未观察到 checkbox/radio/submenu 插入成功")
 		}
 		if !sawPageTarget.Load() {
 			log.Fatal("未观察到页面目标类型")

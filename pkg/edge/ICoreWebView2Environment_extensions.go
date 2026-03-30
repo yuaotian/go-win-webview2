@@ -82,7 +82,7 @@ func (e *ICoreWebView2Environment6) CreatePrintSettings() (*ICoreWebView2PrintSe
 	return settings, nil
 }
 
-func (e *ICoreWebView2Environment9) CreateContextMenuItem(label string, iconStream *w32.IUnknown, kind COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND) (*ICoreWebView2ContextMenuItem, error) {
+func (e *ICoreWebView2Environment9) CreateContextMenuItem(label string, iconStream *w32.IStream, kind COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND) (*ICoreWebView2ContextMenuItem, error) {
 	_label, err := windows.UTF16PtrFromString(label)
 	if err != nil {
 		return nil, err

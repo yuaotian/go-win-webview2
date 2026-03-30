@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"github.com/yuaotian/go-win-webview2/pkg/edge"
 )
 
@@ -174,7 +175,19 @@ func (c *ContextMenuItemCollection) AppendCommand(label string, onSelected func(
 }
 
 func (c *ContextMenuItemCollection) InsertCommand(index uint32, label string, onSelected func()) error {
-	return c.insertCustomItem(index, label, edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, onSelected)
+	return c.insertCustomItem(index, label, edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, nil, false, false, onSelected, nil)
+}
+
+func (c *ContextMenuItemCollection) AppendCommandWithIcon(label string, icon *Stream, onSelected func()) error {
+	count, err := c.Count()
+	if err != nil {
+		return err
+	}
+	return c.InsertCommandWithIcon(count, label, icon, onSelected)
+}
+
+func (c *ContextMenuItemCollection) InsertCommandWithIcon(index uint32, label string, icon *Stream, onSelected func()) error {
+	return c.insertCustomItem(index, label, edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, icon, false, false, onSelected, nil)
 }
 
 func (c *ContextMenuItemCollection) AppendSeparator() error {
@@ -186,10 +199,34 @@ func (c *ContextMenuItemCollection) AppendSeparator() error {
 }
 
 func (c *ContextMenuItemCollection) InsertSeparator(index uint32) error {
-	return c.insertCustomItem(index, "", edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR, nil)
+	return c.insertCustomItem(index, "", edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR, nil, false, false, nil, nil)
 }
 
-func (c *ContextMenuItemCollection) insertCustomItem(index uint32, label string, kind edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, onSelected func()) error {
+func (c *ContextMenuItemCollection) AppendCheckBox(label string, checked bool, onSelected func()) error {
+	count, err := c.Count()
+	if err != nil {
+		return err
+	}
+	return c.insertCustomItem(count, label, edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_CHECK_BOX, nil, true, checked, onSelected, nil)
+}
+
+func (c *ContextMenuItemCollection) AppendRadio(label string, checked bool, onSelected func()) error {
+	count, err := c.Count()
+	if err != nil {
+		return err
+	}
+	return c.insertCustomItem(count, label, edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_RADIO, nil, true, checked, onSelected, nil)
+}
+
+func (c *ContextMenuItemCollection) AppendSubMenu(label string, icon *Stream, builder func(*ContextMenuItemCollection) error) error {
+	count, err := c.Count()
+	if err != nil {
+		return err
+	}
+	return c.insertCustomItem(count, label, edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SUBMENU, icon, false, false, nil, builder)
+}
+
+func (c *ContextMenuItemCollection) insertCustomItem(index uint32, label string, kind edge.COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, icon *Stream, shouldSetChecked bool, checked bool, onSelected func(), builder func(*ContextMenuItemCollection) error) error {
 	if c == nil || c.inner == nil || c.env == nil {
 		return errors.New("context menu items are not initialized")
 	}
@@ -198,15 +235,38 @@ func (c *ContextMenuItemCollection) insertCustomItem(index uint32, label string,
 		return errors.New("ICoreWebView2Environment9 is not available")
 	}
 
-	item, err := env9.CreateContextMenuItem(label, nil, kind)
+	var iconStream *w32.IStream
+	if icon != nil {
+		iconStream = icon.inner
+	}
+
+	item, err := env9.CreateContextMenuItem(label, iconStream, kind)
 	if err != nil {
 		return err
+	}
+	if shouldSetChecked {
+		if err := item.PutIsChecked(checked); err != nil {
+			return err
+		}
 	}
 	if onSelected != nil {
 		if c.chromium == nil {
 			return errors.New("chromium is not initialized")
 		}
 		if err := c.chromium.RegisterContextMenuCommand(item, onSelected); err != nil {
+			return err
+		}
+	}
+	if builder != nil {
+		children, err := item.GetChildren()
+		if err != nil {
+			return err
+		}
+		if err := builder(&ContextMenuItemCollection{
+			inner:    children,
+			env:      c.env,
+			chromium: c.chromium,
+		}); err != nil {
 			return err
 		}
 	}
@@ -263,6 +323,20 @@ func (i *ContextMenuItem) IsChecked() (bool, error) {
 		return false, errors.New("context menu item is not initialized")
 	}
 	return i.inner.GetIsChecked()
+}
+
+func (i *ContextMenuItem) SetEnabled(enabled bool) error {
+	if i == nil || i.inner == nil {
+		return errors.New("context menu item is not initialized")
+	}
+	return i.inner.PutIsEnabled(enabled)
+}
+
+func (i *ContextMenuItem) SetChecked(checked bool) error {
+	if i == nil || i.inner == nil {
+		return errors.New("context menu item is not initialized")
+	}
+	return i.inner.PutIsChecked(checked)
 }
 
 func (i *ContextMenuItem) Children() (*ContextMenuItemCollection, error) {

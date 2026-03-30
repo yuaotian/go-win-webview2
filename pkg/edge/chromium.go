@@ -93,6 +93,7 @@ type Chromium struct {
 	contextMenuItems sync.Map
 	printRequests    sync.Map
 	printPDFRequests sync.Map
+	printPDFStreams  sync.Map
 }
 
 func NewChromium() *Chromium {
@@ -704,8 +705,36 @@ func (e *Chromium) CreatePrintSettings() (*ICoreWebView2PrintSettings, error) {
 	return environment6.CreatePrintSettings()
 }
 
+func (e *Chromium) PrintToPDFStreamWithSettings(settings *ICoreWebView2PrintSettings, callback func(error, *w32.IStream)) error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+	if callback == nil {
+		return errors.New("print to pdf stream callback is required")
+	}
+
+	webview2_16 := e.GetICoreWebView2_16()
+	if webview2_16 == nil {
+		return errors.New("ICoreWebView2_16 is not available")
+	}
+
+	request := &printToPDFStreamRequest{
+		chromium: e,
+		callback: callback,
+	}
+	request.handler = newICoreWebView2PrintToPdfStreamCompletedHandler(request)
+
+	key := uintptr(unsafe.Pointer(request.handler))
+	e.printPDFStreams.Store(key, request)
+	if err := webview2_16.PrintToPdfStream(settings, request.handler); err != nil {
+		e.printPDFStreams.Delete(key)
+		return err
+	}
+	return nil
+}
+
 type capturePreviewRequest struct {
-	stream   *w32.IUnknown
+	stream   *w32.IStream
 	handler  *ICoreWebView2CapturePreviewCompletedHandler
 	chromium *Chromium
 }
@@ -736,7 +765,7 @@ func (r *capturePreviewRequest) CapturePreviewCompleted(result uintptr) uintptr 
 	return 0
 }
 
-func createPreviewFileStream(path string) (*w32.IUnknown, error) {
+func createPreviewFileStream(path string) (*w32.IStream, error) {
 	return w32.SHCreateWriteFileStream(path)
 }
 
@@ -1001,6 +1030,50 @@ func (r *printRequest) PrintCompleted(errorCode uintptr, status COREWEBVIEW2_PRI
 		return 0
 	}
 	r.callback(nil, status)
+	return 0
+}
+
+type printToPDFStreamRequest struct {
+	handler  *ICoreWebView2PrintToPdfStreamCompletedHandler
+	chromium *Chromium
+	callback func(error, *w32.IStream)
+}
+
+func (r *printToPDFStreamRequest) QueryInterface(_, _ uintptr) uintptr {
+	return 0
+}
+
+func (r *printToPDFStreamRequest) AddRef() uintptr {
+	return 1
+}
+
+func (r *printToPDFStreamRequest) Release() uintptr {
+	return 1
+}
+
+func (r *printToPDFStreamRequest) PrintToPdfStreamCompleted(errorCode uintptr, stream uintptr) uintptr {
+	var pdfStream *w32.IStream
+	if stream != 0 {
+		pdfStream = (*w32.IStream)(unsafe.Pointer(stream))
+	}
+	if r.chromium != nil && r.handler != nil {
+		r.chromium.printPDFStreams.Delete(uintptr(unsafe.Pointer(r.handler)))
+	}
+	if r.callback == nil {
+		if pdfStream != nil {
+			pdfStream.Release()
+		}
+		return 0
+	}
+	if int32(errorCode) < 0 {
+		r.callback(fmt.Errorf("print to pdf stream completed with error: %08x", errorCode), nil)
+		return 0
+	}
+	if pdfStream != nil {
+		// WebView2 在回调里借出 IStream；这里补一份 AddRef 给 public Stream 包装层持有。
+		pdfStream.AddRef()
+	}
+	r.callback(nil, pdfStream)
 	return 0
 }
 

@@ -6,6 +6,7 @@ package webview2
 import (
 	"errors"
 
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"github.com/yuaotian/go-win-webview2/pkg/edge"
 )
 
@@ -104,6 +105,11 @@ type PrintToPDFResult struct {
 	Successful bool
 }
 
+type PrintToPDFStreamResult struct {
+	Error  error
+	Stream *Stream
+}
+
 type PrintJobResult struct {
 	Error  error
 	Status PrintStatus
@@ -178,6 +184,33 @@ func (w *webview) PrintToPDFWithSettings(path string, settings *PrintSettings, c
 				Error:      callbackErr,
 				Successful: successful,
 			})
+		})
+	})
+	return err
+}
+
+func (w *webview) PrintToPDFStreamWithSettings(settings *PrintSettings, callback func(PrintToPDFStreamResult)) error {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return errors.New("browser does not support print to pdf stream")
+	}
+
+	var inner *edge.ICoreWebView2PrintSettings
+	if settings != nil {
+		inner = settings.inner
+	}
+
+	var err error
+	w.dispatchSync(func() {
+		err = chromium.PrintToPDFStreamWithSettings(inner, func(callbackErr error, stream *w32.IStream) {
+			if callback == nil {
+				return
+			}
+			if callbackErr != nil {
+				callback(PrintToPDFStreamResult{Error: callbackErr})
+				return
+			}
+			callback(PrintToPDFStreamResult{Stream: newOwnedStream(stream)})
 		})
 	})
 	return err

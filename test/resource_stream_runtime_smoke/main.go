@@ -87,7 +87,13 @@ func main() {
 			}
 		case "https://stream.local/large.txt":
 			sawFileResponse.Store(true)
-			if err := event.SetFileResponse(largeFilePath, 200, "OK", "Content-Type: text/plain; charset=utf-8\r\n"); err != nil {
+			stream, err := webview2.NewStreamFromFile(largeFilePath)
+			if err != nil {
+				log.Printf("创建 raw stream 失败: %v", err)
+				return
+			}
+			defer stream.Release()
+			if err := event.SetStreamResponse(stream, 200, "OK", "Content-Type: text/plain; charset=utf-8\r\n"); err != nil {
 				log.Printf("设置文件流响应失败: %v", err)
 			}
 		}
