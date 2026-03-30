@@ -318,6 +318,18 @@ func (i *ICoreWebView2ContextMenuItem) GetKind() (COREWEBVIEW2_CONTEXT_MENU_ITEM
 	return kind, nil
 }
 
+func (i *ICoreWebView2ContextMenuItem) GetIcon() (*w32.IStream, error) {
+	var icon *w32.IStream
+	_, _, err := i.vtbl.GetIcon.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&icon)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return nil, err
+	}
+	return icon, nil
+}
+
 func (i *ICoreWebView2ContextMenuItem) PutIsEnabled(enabled bool) error {
 	_, _, err := i.vtbl.PutIsEnabled.Call(
 		uintptr(unsafe.Pointer(i)),

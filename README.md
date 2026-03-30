@@ -1278,7 +1278,7 @@ w.Init(`
 - 观察页面与右侧日志区域
 - 预期结果：
   - 页面成功通过 `Stream` 读取 `https://app.local/stream.txt`
-  - 右键区域可看到宿主插入的 command / icon / checkbox / radio / submenu
+  - 右键区域可看到宿主插入的 command / checkbox / radio / submenu
   - 点击 “导出 PDF” 和 “导出 PDF 流” 后，日志会反馈结果
 
 4. `CapturePreview / CapturePreviewWithOptions`

@@ -4,7 +4,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -25,11 +24,6 @@ func main() {
 	if err := os.WriteFile(streamFile, []byte("这是通过文件型 IStream 返回给页面的响应内容。"), 0o644); err != nil {
 		log.Fatalf("写入流式响应文件失败: %v", err)
 	}
-	menuIconBytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgwJ/l7n1VwAAAABJRU5ErkJggg==")
-	if err != nil {
-		log.Fatalf("解码菜单图标失败: %v", err)
-	}
-
 	pdfPath := filepath.Join(tempDir, "desktop-control-demo.pdf")
 
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
@@ -267,8 +261,8 @@ func main() {
 
 	      <article class="panel">
 	        <h2>D：原生右键菜单</h2>
-	        <p>在下面区域点击右键，查看 Go 宿主插入的原生菜单项、带 icon 的命令项，以及 checkbox / radio / submenu。</p>
-	        <div class="target">右键点击这里。点击 “Go 宿主菜单项” 或 “带 icon 的宿主命令” 后，右侧日志会追加记录。</div>
+	        <p>在下面区域点击右键，查看 Go 宿主插入的原生菜单项，以及 checkbox / radio / submenu。</p>
+	        <div class="target">右键点击这里。点击 “Go 宿主菜单项” 后，右侧日志会追加记录。</div>
 	      </article>
 
       <article class="panel">
@@ -346,18 +340,6 @@ func main() {
 			})
 		}); err != nil {
 			logToPage("插入 Go 宿主菜单项失败: " + err.Error())
-			return
-		}
-		iconStream, err := webview2.NewStreamFromBytes(menuIconBytes)
-		if err != nil {
-			logToPage("创建 icon stream 失败: " + err.Error())
-			return
-		}
-		defer iconStream.Release()
-		if err := items.AppendCommandWithIcon("带 icon 的宿主命令", iconStream, func() {
-			logToPage("带 icon 的宿主命令回调已触发")
-		}); err != nil {
-			logToPage("插入 icon 菜单项失败: " + err.Error())
 			return
 		}
 		if err := items.AppendCheckBox("显示更多日志", true, func() {

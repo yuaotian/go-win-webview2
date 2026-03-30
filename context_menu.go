@@ -237,7 +237,8 @@ func (c *ContextMenuItemCollection) insertCustomItem(index uint32, label string,
 
 	var iconStream *w32.IStream
 	if icon != nil {
-		iconStream = icon.inner
+		iconStream = icon.cloneInner()
+		defer iconStream.Release()
 	}
 
 	item, err := env9.CreateContextMenuItem(label, iconStream, kind)
@@ -309,6 +310,17 @@ func (i *ContextMenuItem) Kind() (ContextMenuItemKind, error) {
 		return 0, err
 	}
 	return ContextMenuItemKind(kind), nil
+}
+
+func (i *ContextMenuItem) Icon() (*Stream, error) {
+	if i == nil || i.inner == nil {
+		return nil, errors.New("context menu item is not initialized")
+	}
+	icon, err := i.inner.GetIcon()
+	if err != nil {
+		return nil, err
+	}
+	return newOwnedStream(icon), nil
 }
 
 func (i *ContextMenuItem) IsEnabled() (bool, error) {
