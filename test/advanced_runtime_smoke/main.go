@@ -19,6 +19,7 @@ func main() {
 	var sawDevToolsMethod atomic.Bool
 	var sawDevToolsEvent atomic.Bool
 	var once atomic.Bool
+	var unsubscribe func()
 
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug: false,
@@ -35,17 +36,6 @@ func main() {
 	if w == nil {
 		log.Fatal("创建 WebView 失败")
 	}
-
-	unsubscribe, err := w.SubscribeDevToolsProtocolEvent("Runtime.consoleAPICalled", func(json string) {
-		log.Printf("收到 DevTools 事件: %s", json)
-		if strings.Contains(json, "devtools-smoke") {
-			sawDevToolsEvent.Store(true)
-		}
-	})
-	if err != nil {
-		log.Fatalf("订阅 DevTools 事件失败: %v", err)
-	}
-	defer unsubscribe()
 
 	w.OnNewWindowRequested(func(event *webview2.NewWindowRequestedEvent) {
 		log.Printf("收到新窗口请求: %s", event.URI)
@@ -74,33 +64,43 @@ func main() {
 				return
 			}
 			log.Printf("Runtime.enable 返回: %s", result)
+
+			var subscribeErr error
+			unsubscribe, subscribeErr = w.SubscribeDevToolsProtocolEvent("Runtime.consoleAPICalled", func(json string) {
+				log.Printf("收到 DevTools 事件: %s", json)
+				if strings.Contains(json, "devtools-smoke") {
+					sawDevToolsEvent.Store(true)
+				}
+			})
+			if subscribeErr != nil {
+				log.Printf("订阅 DevTools 事件失败: %v", subscribeErr)
+			}
+
+			if err := w.CallDevToolsProtocolMethod("Runtime.evaluate", `{"expression":"document.title"}`, func(err error, result string) {
+				if err != nil {
+					log.Printf("Runtime.evaluate 失败: %v", err)
+					return
+				}
+				log.Printf("Runtime.evaluate 返回: %s", result)
+				if strings.Contains(result, "runtime-advanced") {
+					sawDevToolsMethod.Store(true)
+				}
+			}); err != nil {
+				log.Printf("调用 Runtime.evaluate 失败: %v", err)
+			}
+
+			w.Eval(`
+				console.log("devtools-smoke");
+				setTimeout(function () {
+					window.open("about:blank#popup", "_blank");
+				}, 80);
+				setTimeout(function () {
+					window.close();
+				}, 220);
+			`)
 		}); err != nil {
 			log.Printf("调用 Runtime.enable 失败: %v", err)
-			return
 		}
-
-		if err := w.CallDevToolsProtocolMethod("Runtime.evaluate", `{"expression":"document.title"}`, func(err error, result string) {
-			if err != nil {
-				log.Printf("Runtime.evaluate 失败: %v", err)
-				return
-			}
-			log.Printf("Runtime.evaluate 返回: %s", result)
-			if strings.Contains(result, "runtime-advanced") {
-				sawDevToolsMethod.Store(true)
-			}
-		}); err != nil {
-			log.Printf("调用 Runtime.evaluate 失败: %v", err)
-		}
-
-		w.Eval(`
-			console.log("devtools-smoke");
-			setTimeout(function () {
-				window.open("about:blank#popup", "_blank");
-			}, 80);
-			setTimeout(function () {
-				window.close();
-			}, 220);
-		`)
 	})
 
 	w.SetHtml(`<!doctype html>
@@ -115,6 +115,9 @@ func main() {
 </html>`)
 
 	time.AfterFunc(4000*time.Millisecond, func() {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
 		if !sawNewWindow.Load() {
 			log.Fatal("未观察到新窗口请求")
 		}

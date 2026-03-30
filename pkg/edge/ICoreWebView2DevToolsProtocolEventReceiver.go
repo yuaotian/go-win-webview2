@@ -25,11 +25,14 @@ func (i *ICoreWebView2DevToolsProtocolEventReceiver) Release() uintptr {
 }
 
 func (i *ICoreWebView2DevToolsProtocolEventReceiver) AddDevToolsProtocolEventReceived(handler *ICoreWebView2DevToolsProtocolEventReceivedEventHandler, token *_EventRegistrationToken) error {
-	_, _, err := i.vtbl.AddDevToolsProtocolEventReceived.Call(
+	hr, _, err := i.vtbl.AddDevToolsProtocolEventReceived.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(handler)),
 		uintptr(unsafe.Pointer(token)),
 	)
+	if int32(hr) < 0 {
+		return windows.Errno(hr)
+	}
 	if err != windows.ERROR_SUCCESS {
 		return err
 	}
@@ -37,10 +40,13 @@ func (i *ICoreWebView2DevToolsProtocolEventReceiver) AddDevToolsProtocolEventRec
 }
 
 func (i *ICoreWebView2DevToolsProtocolEventReceiver) RemoveDevToolsProtocolEventReceived(token _EventRegistrationToken) error {
-	_, _, err := i.vtbl.RemoveDevToolsProtocolEventReceived.Call(
+	hr, _, err := i.vtbl.RemoveDevToolsProtocolEventReceived.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(&token)),
 	)
+	if int32(hr) < 0 {
+		return windows.Errno(hr)
+	}
 	if err != windows.ERROR_SUCCESS {
 		return err
 	}

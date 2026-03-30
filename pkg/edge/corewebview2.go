@@ -4,6 +4,8 @@
 package edge
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"runtime"
 	"unsafe"
@@ -555,12 +557,15 @@ func (i *ICoreWebView2) CallDevToolsProtocolMethod(methodName string, parameters
 		handlerPtr = uintptr(unsafe.Pointer(handler))
 	}
 
-	_, _, err = i.vtbl.CallDevToolsProtocolMethod.Call(
+	hr, _, err := i.vtbl.CallDevToolsProtocolMethod.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(methodPtr)),
 		uintptr(unsafe.Pointer(paramsPtr)),
 		handlerPtr,
 	)
+	if int32(hr) < 0 {
+		return fmt.Errorf("call devtools protocol method failed: %08x", hr)
+	}
 	if err != windows.ERROR_SUCCESS {
 		return err
 	}
@@ -574,13 +579,19 @@ func (i *ICoreWebView2) GetDevToolsProtocolEventReceiver(eventName string) (*ICo
 	}
 
 	var receiver *ICoreWebView2DevToolsProtocolEventReceiver
-	_, _, err = i.vtbl.GetDevToolsProtocolEventReceiver.Call(
+	hr, _, err := i.vtbl.GetDevToolsProtocolEventReceiver.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(eventNamePtr)),
 		uintptr(unsafe.Pointer(&receiver)),
 	)
+	if int32(hr) < 0 {
+		return nil, fmt.Errorf("get devtools protocol event receiver failed: %08x", hr)
+	}
 	if err != windows.ERROR_SUCCESS {
 		return nil, err
+	}
+	if receiver == nil {
+		return nil, errors.New("devtools protocol event receiver is nil")
 	}
 	return receiver, nil
 }
