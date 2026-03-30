@@ -28,14 +28,12 @@ func (i *ICoreWebView2WebResourceRequestedEventArgs) AddRef() uintptr {
 }
 
 func (i *ICoreWebView2WebResourceRequestedEventArgs) PutResponse(response *ICoreWebView2WebResourceResponse) error {
-	var err error
-
-	_, _, err = i.vtbl.PutResponse.Call(
+	hr, _, _ := i.vtbl.PutResponse.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(response)),
 	)
-	if err != windows.ERROR_SUCCESS {
-		return err
+	if int32(hr) < 0 {
+		return windows.Errno(hr)
 	}
 	return nil
 }

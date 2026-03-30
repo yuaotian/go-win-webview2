@@ -102,11 +102,13 @@ func main() {
 			once.Store(true)
 			sawIntercept.Store(true)
 
-			if err := w.SetVirtualHostNameToFolderMapping("mapped.local", tempDir, webview2.HostResourceAccessKindAllow); err != nil {
-				log.Printf("设置虚拟主机映射失败: %v", err)
-				return
-			}
-			w.Navigate("https://mapped.local/index.html")
+			time.AfterFunc(100*time.Millisecond, func() {
+				if err := w.SetVirtualHostNameToFolderMapping("mapped.local", tempDir, webview2.HostResourceAccessKindAllow); err != nil {
+					log.Printf("设置虚拟主机映射失败: %v", err)
+					return
+				}
+				w.Navigate("https://mapped.local/index.html")
+			})
 		}
 
 		if title == "mapped-ready" {

@@ -65,17 +65,6 @@ func main() {
 			}
 			log.Printf("Runtime.enable 返回: %s", result)
 
-			var subscribeErr error
-			unsubscribe, subscribeErr = w.SubscribeDevToolsProtocolEvent("Runtime.consoleAPICalled", func(json string) {
-				log.Printf("收到 DevTools 事件: %s", json)
-				if strings.Contains(json, "devtools-smoke") {
-					sawDevToolsEvent.Store(true)
-				}
-			})
-			if subscribeErr != nil {
-				log.Printf("订阅 DevTools 事件失败: %v", subscribeErr)
-			}
-
 			if err := w.CallDevToolsProtocolMethod("Runtime.evaluate", `{"expression":"document.title"}`, func(err error, result string) {
 				if err != nil {
 					log.Printf("Runtime.evaluate 失败: %v", err)
@@ -89,15 +78,33 @@ func main() {
 				log.Printf("调用 Runtime.evaluate 失败: %v", err)
 			}
 
-			w.Eval(`
-				console.log("devtools-smoke");
-				setTimeout(function () {
-					window.open("about:blank#popup", "_blank");
-				}, 80);
-				setTimeout(function () {
-					window.close();
-				}, 220);
-			`)
+			if err := w.CallDevToolsProtocolMethod("Security.enable", `{}`, func(err error, result string) {
+				if err != nil {
+					log.Printf("启用 Security 域失败: %v", err)
+					return
+				}
+				log.Printf("Security.enable 返回: %s", result)
+
+				var subscribeErr error
+				unsubscribe, subscribeErr = w.SubscribeDevToolsProtocolEvent("Security.securityStateChanged", func(json string) {
+					log.Printf("收到 DevTools 事件: %s", json)
+					sawDevToolsEvent.Store(true)
+				})
+				if subscribeErr != nil {
+					log.Printf("订阅 DevTools 事件失败: %v", subscribeErr)
+				}
+
+				w.Eval(`
+					setTimeout(function () {
+						window.open("about:blank#popup", "_blank");
+					}, 80);
+					setTimeout(function () {
+						window.close();
+					}, 220);
+				`)
+			}); err != nil {
+				log.Printf("调用 Security.enable 失败: %v", err)
+			}
 		}); err != nil {
 			log.Printf("调用 Runtime.enable 失败: %v", err)
 		}

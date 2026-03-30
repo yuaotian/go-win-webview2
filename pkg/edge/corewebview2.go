@@ -223,7 +223,7 @@ func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, sta
 		return nil, err
 	}
 	var response *ICoreWebView2WebResourceResponse
-	_, _, err = e.vtbl.CreateWebResourceResponse.Call(
+	hr, _, _ := e.vtbl.CreateWebResourceResponse.Call(
 		uintptr(unsafe.Pointer(e)),
 		stream,
 		uintptr(statusCode),
@@ -231,8 +231,11 @@ func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, sta
 		uintptr(unsafe.Pointer(_headers)),
 		uintptr(unsafe.Pointer(&response)),
 	)
-	if err != windows.ERROR_SUCCESS {
-		return nil, err
+	if int32(hr) < 0 {
+		return nil, fmt.Errorf("create web resource response failed: %08x", hr)
+	}
+	if response == nil {
+		return nil, errors.New("create web resource response returned nil response")
 	}
 	return response, nil
 
