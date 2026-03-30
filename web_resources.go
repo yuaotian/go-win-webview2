@@ -47,6 +47,7 @@ type DOMContentLoadedEvent struct {
 
 type WebResourceResponse struct {
 	Content      []byte
+	FilePath     string
 	StatusCode   int
 	ReasonPhrase string
 	Headers      string
@@ -65,7 +66,21 @@ func (e *WebResourceRequestedEvent) SetResponse(response WebResourceResponse) er
 	if e == nil || e.args == nil || e.env == nil {
 		return errors.New("web resource event is not initialized")
 	}
-	webResourceResponse, err := e.env.CreateWebResourceResponse(response.Content, response.StatusCode, response.ReasonPhrase, response.Headers)
+
+	if len(response.Content) > 0 && response.FilePath != "" {
+		return errors.New("web resource response content and file path cannot both be set")
+	}
+
+	var (
+		err                 error
+		webResourceResponse *edge.ICoreWebView2WebResourceResponse
+	)
+	if response.FilePath != "" {
+		// 大文件/多媒体优先走文件 IStream，避免强制拷入 []byte。
+		webResourceResponse, err = e.env.CreateWebResourceResponseFromFile(response.FilePath, response.StatusCode, response.ReasonPhrase, response.Headers)
+	} else {
+		webResourceResponse, err = e.env.CreateWebResourceResponse(response.Content, response.StatusCode, response.ReasonPhrase, response.Headers)
+	}
 	if err != nil {
 		return fmt.Errorf("create web resource response failed: %w", err)
 	}
@@ -73,6 +88,15 @@ func (e *WebResourceRequestedEvent) SetResponse(response WebResourceResponse) er
 		return fmt.Errorf("put web resource response failed: %w", err)
 	}
 	return nil
+}
+
+func (e *WebResourceRequestedEvent) SetFileResponse(path string, statusCode int, reasonPhrase string, headers string) error {
+	return e.SetResponse(WebResourceResponse{
+		FilePath:     path,
+		StatusCode:   statusCode,
+		ReasonPhrase: reasonPhrase,
+		Headers:      headers,
+	})
 }
 
 func (e *WebResourceRequestedEvent) GetDeferral() (*WebViewDeferral, error) {

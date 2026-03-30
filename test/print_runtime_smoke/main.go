@@ -30,6 +30,7 @@ func main() {
 	_ = os.Remove(pdfPath)
 
 	var printRequested atomic.Bool
+	var printSucceeded atomic.Bool
 
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug: false,
@@ -55,8 +56,37 @@ func main() {
 		printRequested.Store(true)
 
 		time.AfterFunc(300*time.Millisecond, func() {
-			w.PrintToPDF(pdfPath)
-			log.Printf("打印到 PDF 请求已发出: %s", pdfPath)
+			settings, err := w.NewPrintSettings()
+			if err != nil {
+				log.Fatalf("创建打印设置失败: %v", err)
+			}
+			if err := settings.SetOrientation(webview2.PrintOrientationLandscape); err != nil {
+				log.Fatalf("设置打印方向失败: %v", err)
+			}
+			if err := settings.SetShouldPrintBackgrounds(true); err != nil {
+				log.Fatalf("设置背景打印失败: %v", err)
+			}
+			if err := settings.SetShouldPrintHeaderAndFooter(true); err != nil {
+				log.Fatalf("设置页眉页脚失败: %v", err)
+			}
+			if err := settings.SetHeaderTitle("print-smoke"); err != nil {
+				log.Fatalf("设置页眉标题失败: %v", err)
+			}
+			if err := settings.SetPageRanges("1-1"); err != nil {
+				log.Fatalf("设置页范围失败: %v", err)
+			}
+			if err := w.PrintToPDFWithSettings(pdfPath, settings, func(result webview2.PrintToPDFResult) {
+				if result.Error != nil {
+					log.Printf("打印到 PDF 回调失败: %v", result.Error)
+					return
+				}
+				if result.Successful {
+					printSucceeded.Store(true)
+				}
+			}); err != nil {
+				log.Fatalf("发起带设置的 PDF 打印失败: %v", err)
+			}
+			log.Printf("带设置的打印到 PDF 请求已发出: %s", pdfPath)
 		})
 	})
 
@@ -79,6 +109,9 @@ func main() {
 		}
 		if info.Size() == 0 {
 			log.Fatal("生成的 PDF 文件大小为 0")
+		}
+		if !printSucceeded.Load() {
+			log.Fatal("未观察到 PrintToPDFWithSettings 成功回调")
 		}
 		log.Printf("print smoke 验证通过，PDF 文件：%s", pdfPath)
 		requestClose(w)

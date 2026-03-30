@@ -125,7 +125,11 @@ type WebView interface {
 	// 打印相关方法
 	Print()                                                                     // 直接打印
 	PrintToPDF(path string)                                                     // 打印到 PDF 文件
+	PrintToPDFWithSettings(path string, settings *PrintSettings, callback func(PrintToPDFResult)) error // 带设置打印到 PDF
+	PrintWithSettings(settings *PrintSettings, callback func(PrintJobResult)) error // 带设置直接打印
 	ShowPrintDialog()                                                           // 显示打印对话框
+	ShowPrintDialogWithKind(kind PrintDialogKind) error                         // 按指定类型显示打印对话框
+	NewPrintSettings() (*PrintSettings, error)                                  // 创建打印设置对象
 	CapturePreview(path string) error                                           // 截图当前视口到文件
 	CapturePreviewWithOptions(path string, options CapturePreviewOptions) error // 带选项截图
 
@@ -141,8 +145,9 @@ type WebView interface {
 	OnDOMContentLoaded(func(DOMContentLoadedEvent))
 
 	// 右键菜单控制
-	DisableContextMenu() error // 禁用右键菜单
-	EnableContextMenu() error  // 启用右键菜单
+	DisableContextMenu() error                    // 禁用右键菜单
+	EnableContextMenu() error                     // 启用右键菜单
+	OnContextMenuRequested(func(*ContextMenuRequestedEvent)) // 原生右键菜单请求
 
 	// JavaScript Hook 相关方法
 	AddJSHook(hook JSHook)    // 添加 JS Hook

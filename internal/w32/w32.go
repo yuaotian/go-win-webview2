@@ -18,8 +18,9 @@ var (
 	kernel32                   = windows.NewLazySystemDLL("kernel32")
 	Kernel32GetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 
-	shlwapi                  = windows.NewLazySystemDLL("shlwapi")
-	shlwapiSHCreateMemStream = shlwapi.NewProc("SHCreateMemStream")
+	shlwapi                      = windows.NewLazySystemDLL("shlwapi")
+	shlwapiSHCreateMemStream     = shlwapi.NewProc("SHCreateMemStream")
+	shlwapiSHCreateStreamOnFileEx = shlwapi.NewProc("SHCreateStreamOnFileEx")
 
 	user32                   = windows.NewLazySystemDLL("user32")
 	User32LoadImageW         = user32.NewProc("LoadImageW")
@@ -79,6 +80,14 @@ const (
 const (
 	SystemMetricsCxIcon = 11
 	SystemMetricsCyIcon = 12
+)
+
+const (
+	StgmRead            = 0x00000000
+	StgmWrite           = 0x00000001
+	StgmShareExclusive  = 0x00000010
+	StgmShareDenyNone   = 0x00000040
+	StgmCreate          = 0x00001000
 )
 
 const (
@@ -293,6 +302,40 @@ func SHCreateMemStream(data []byte) (uintptr, error) {
 	}
 
 	return ret, nil
+}
+
+// SHCreateReadFileStream 以只读方式打开文件流，适合 WebView2 资源响应等大文件场景。
+func SHCreateReadFileStream(path string) (*IUnknown, error) {
+	return shCreateStreamOnFileEx(path, StgmRead|StgmShareDenyNone, windows.FILE_ATTRIBUTE_NORMAL, false)
+}
+
+// SHCreateWriteFileStream 以独占写入方式创建文件流，适合截图/导出等落盘场景。
+func SHCreateWriteFileStream(path string) (*IUnknown, error) {
+	return shCreateStreamOnFileEx(path, StgmCreate|StgmWrite|StgmShareExclusive, windows.FILE_ATTRIBUTE_NORMAL, true)
+}
+
+func shCreateStreamOnFileEx(path string, mode uint32, attributes uint32, create bool) (*IUnknown, error) {
+	var stream *IUnknown
+	createFlag := uintptr(0)
+	if create {
+		createFlag = 1
+	}
+
+	hr, _, _ := shlwapiSHCreateStreamOnFileEx.Call(
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(path))),
+		uintptr(mode),
+		uintptr(attributes),
+		createFlag,
+		0,
+		uintptr(unsafe.Pointer(&stream)),
+	)
+	if int32(hr) < 0 {
+		return nil, windows.Errno(hr)
+	}
+	if stream == nil {
+		return nil, syscall.EINVAL
+	}
+	return stream, nil
 }
 
 // GetWindowRect retrieves the dimensions of the specified window

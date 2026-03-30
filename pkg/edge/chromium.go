@@ -19,17 +19,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var (
-	shlwapi                    = windows.NewLazySystemDLL("shlwapi.dll")
-	shCreateStreamOnFileExProc = shlwapi.NewProc("SHCreateStreamOnFileEx")
-)
-
-const (
-	stgmWrite          = 0x00000001
-	stgmShareExclusive = 0x00000010
-	stgmCreate         = 0x00001000
-)
-
 // Chromium 结构体定义
 type Chromium struct {
 	hwnd                  uintptr
@@ -47,6 +36,8 @@ type Chromium struct {
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
 	newWindowRequested    *ICoreWebView2NewWindowRequestedEventHandler
 	windowCloseRequested  *ICoreWebView2WindowCloseRequestedEventHandler
+	contextMenuRequested  *ICoreWebView2ContextMenuRequestedEventHandler
+	customItemSelected    *ICoreWebView2CustomItemSelectedEventHandler
 	domContentLoaded      *ICoreWebView2DOMContentLoadedEventHandler
 	navigationStarting    *ICoreWebView2NavigationStartingEventHandler
 	sourceChanged         *ICoreWebView2SourceChangedEventHandler
@@ -67,6 +58,7 @@ type Chromium struct {
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NewWindowRequestedCallback   func(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs)
 	WindowCloseRequestedCallback func()
+	ContextMenuRequestedCallback func(sender *ICoreWebView2, args *ICoreWebView2ContextMenuRequestedEventArgs)
 	DOMContentLoadedCallback     func(sender *ICoreWebView2, args *ICoreWebView2DOMContentLoadedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
@@ -98,6 +90,9 @@ type Chromium struct {
 	previewRequests  sync.Map
 	devToolsRequests sync.Map
 	devToolsEvents   sync.Map
+	contextMenuItems sync.Map
+	printRequests    sync.Map
+	printPDFRequests sync.Map
 }
 
 func NewChromium() *Chromium {
@@ -122,6 +117,8 @@ func NewChromium() *Chromium {
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.windowCloseRequested = newICoreWebView2WindowCloseRequestedEventHandler(e)
+	e.contextMenuRequested = newICoreWebView2ContextMenuRequestedEventHandler(e)
+	e.customItemSelected = newICoreWebView2CustomItemSelectedEventHandler(e)
 	e.domContentLoaded = newICoreWebView2DOMContentLoadedEventHandler(e)
 	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
 	e.sourceChanged = newICoreWebView2SourceChangedEventHandler(e)
@@ -368,6 +365,11 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		e.finishInitialization(fmt.Errorf("注册 NavigationCompleted 失败: %w", err))
 		return 0
 	}
+	if webview2_11 := e.GetICoreWebView2_11(); webview2_11 != nil {
+		if err := webview2_11.AddContextMenuRequested(e.contextMenuRequested, &token); err != nil {
+			log.Printf("注册 ContextMenuRequested 失败: %v", err)
+		}
+	}
 
 	if err := e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token); err != nil {
 		log.Printf("注册 AcceleratorKeyPressed 失败: %v", err)
@@ -468,6 +470,34 @@ func (e *Chromium) WindowCloseRequested(_ *ICoreWebView2, _ *iUnknown) uintptr {
 
 	// 默认沿用现有窗口关闭语义，避免页面 window.close() 变成空操作。
 	_, _, _ = w32.User32PostMessageW.Call(e.hwnd, w32.WMClose, 0, 0)
+	return 0
+}
+
+func (e *Chromium) ContextMenuRequested(sender *ICoreWebView2, args *ICoreWebView2ContextMenuRequestedEventArgs) uintptr {
+	e.clearContextMenuItemCallbacks()
+	if e.ContextMenuRequestedCallback != nil {
+		e.ContextMenuRequestedCallback(sender, args)
+	}
+	return 0
+}
+
+func (e *Chromium) CustomItemSelected(sender *ICoreWebView2ContextMenuItem, _ *iUnknown) uintptr {
+	if sender == nil {
+		return 0
+	}
+	commandID, err := sender.GetCommandId()
+	if err != nil {
+		log.Printf("读取自定义右键菜单 CommandId 失败: %v", err)
+		return 0
+	}
+	callbackValue, ok := e.contextMenuItems.LoadAndDelete(commandID)
+	if !ok {
+		return 0
+	}
+	callback, ok := callbackValue.(func())
+	if ok && callback != nil {
+		callback()
+	}
 	return 0
 }
 
@@ -596,6 +626,10 @@ func (e *Chromium) CoreWebView2() *ICoreWebView2 {
 
 // PrintToPDF 将当前页面打印到 PDF 文件
 func (e *Chromium) PrintToPDF(path string) error {
+	return e.PrintToPDFWithSettings(path, nil, nil)
+}
+
+func (e *Chromium) PrintToPDFWithSettings(path string, settings *ICoreWebView2PrintSettings, callback func(error, bool)) error {
 	if e.webview == nil {
 		return errors.New("webview not initialized")
 	}
@@ -604,7 +638,23 @@ func (e *Chromium) PrintToPDF(path string) error {
 		return errors.New("ICoreWebView2_7 is not available")
 	}
 
-	return webview2_7.PrintToPdf(path)
+	if callback == nil {
+		return webview2_7.PrintToPdfWithSettings(path, settings, nil)
+	}
+
+	request := &printToPDFRequest{
+		chromium: e,
+		callback: callback,
+	}
+	request.handler = newICoreWebView2PrintToPdfCompletedHandler(request)
+
+	key := uintptr(unsafe.Pointer(request.handler))
+	e.printPDFRequests.Store(key, request)
+	if err := webview2_7.PrintToPdfWithSettings(path, settings, request.handler); err != nil {
+		e.printPDFRequests.Delete(key)
+		return err
+	}
+	return nil
 }
 
 func (e *Chromium) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
@@ -616,6 +666,42 @@ func (e *Chromium) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
 		return errors.New("ICoreWebView2_16 is not available")
 	}
 	return webview2_16.ShowPrintUI(kind)
+}
+
+func (e *Chromium) PrintWithSettings(settings *ICoreWebView2PrintSettings, callback func(error, COREWEBVIEW2_PRINT_STATUS)) error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+	webview2_16 := e.GetICoreWebView2_16()
+	if webview2_16 == nil {
+		return errors.New("ICoreWebView2_16 is not available")
+	}
+
+	if callback == nil {
+		return webview2_16.Print(settings, nil)
+	}
+
+	request := &printRequest{
+		chromium: e,
+		callback: callback,
+	}
+	request.handler = newICoreWebView2PrintCompletedHandler(request)
+
+	key := uintptr(unsafe.Pointer(request.handler))
+	e.printRequests.Store(key, request)
+	if err := webview2_16.Print(settings, request.handler); err != nil {
+		e.printRequests.Delete(key)
+		return err
+	}
+	return nil
+}
+
+func (e *Chromium) CreatePrintSettings() (*ICoreWebView2PrintSettings, error) {
+	environment6 := e.GetICoreWebView2Environment6()
+	if environment6 == nil {
+		return nil, errors.New("ICoreWebView2Environment6 is not available")
+	}
+	return environment6.CreatePrintSettings()
 }
 
 type capturePreviewRequest struct {
@@ -651,19 +737,7 @@ func (r *capturePreviewRequest) CapturePreviewCompleted(result uintptr) uintptr 
 }
 
 func createPreviewFileStream(path string) (*w32.IUnknown, error) {
-	var stream *w32.IUnknown
-	hr, _, _ := shCreateStreamOnFileExProc.Call(
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(path))),
-		uintptr(stgmCreate|stgmWrite|stgmShareExclusive),
-		uintptr(windows.FILE_ATTRIBUTE_NORMAL),
-		1,
-		0,
-		uintptr(unsafe.Pointer(&stream)),
-	)
-	if int32(hr) < 0 {
-		return nil, fmt.Errorf("create preview stream failed: %08x", hr)
-	}
-	return stream, nil
+	return w32.SHCreateWriteFileStream(path)
 }
 
 func (e *Chromium) CapturePreview(path string) error {
@@ -833,6 +907,101 @@ func (e *Chromium) SubscribeDevToolsProtocolEvent(eventName string, handler func
 
 func (e *Chromium) SetDOMContentLoadedCallback(callback func(sender *ICoreWebView2, args *ICoreWebView2DOMContentLoadedEventArgs)) {
 	e.DOMContentLoadedCallback = callback
+}
+
+func (e *Chromium) SetContextMenuRequestedCallback(callback func(sender *ICoreWebView2, args *ICoreWebView2ContextMenuRequestedEventArgs)) {
+	e.ContextMenuRequestedCallback = callback
+}
+
+func (e *Chromium) RegisterContextMenuCommand(item *ICoreWebView2ContextMenuItem, callback func()) error {
+	if item == nil || callback == nil {
+		return nil
+	}
+
+	commandID, err := item.GetCommandId()
+	if err != nil {
+		return err
+	}
+
+	var token _EventRegistrationToken
+	if err := item.AddCustomItemSelected(e.customItemSelected, &token); err != nil {
+		return err
+	}
+	e.contextMenuItems.Store(commandID, callback)
+	return nil
+}
+
+func (e *Chromium) clearContextMenuItemCallbacks() {
+	e.contextMenuItems.Range(func(key, _ interface{}) bool {
+		e.contextMenuItems.Delete(key)
+		return true
+	})
+}
+
+type printToPDFRequest struct {
+	handler  *ICoreWebView2PrintToPdfCompletedHandler
+	chromium *Chromium
+	callback func(error, bool)
+}
+
+func (r *printToPDFRequest) QueryInterface(_, _ uintptr) uintptr {
+	return 0
+}
+
+func (r *printToPDFRequest) AddRef() uintptr {
+	return 1
+}
+
+func (r *printToPDFRequest) Release() uintptr {
+	return 1
+}
+
+func (r *printToPDFRequest) PrintToPdfCompleted(errorCode uintptr, isSuccessful int32) uintptr {
+	if r.chromium != nil && r.handler != nil {
+		r.chromium.printPDFRequests.Delete(uintptr(unsafe.Pointer(r.handler)))
+	}
+	if r.callback == nil {
+		return 0
+	}
+	if int32(errorCode) < 0 {
+		r.callback(fmt.Errorf("print to pdf completed with error: %08x", errorCode), false)
+		return 0
+	}
+	r.callback(nil, isSuccessful != 0)
+	return 0
+}
+
+type printRequest struct {
+	handler  *ICoreWebView2PrintCompletedHandler
+	chromium *Chromium
+	callback func(error, COREWEBVIEW2_PRINT_STATUS)
+}
+
+func (r *printRequest) QueryInterface(_, _ uintptr) uintptr {
+	return 0
+}
+
+func (r *printRequest) AddRef() uintptr {
+	return 1
+}
+
+func (r *printRequest) Release() uintptr {
+	return 1
+}
+
+func (r *printRequest) PrintCompleted(errorCode uintptr, status COREWEBVIEW2_PRINT_STATUS) uintptr {
+	if r.chromium != nil && r.handler != nil {
+		r.chromium.printRequests.Delete(uintptr(unsafe.Pointer(r.handler)))
+	}
+	if r.callback == nil {
+		return 0
+	}
+	if int32(errorCode) < 0 {
+		r.callback(fmt.Errorf("print completed with error: %08x", errorCode), status)
+		return 0
+	}
+	r.callback(nil, status)
+	return 0
 }
 
 // 添加打印相关的回调处理

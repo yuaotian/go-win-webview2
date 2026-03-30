@@ -194,8 +194,8 @@ func NewWithOptions(options WebViewOptions) WebView {
 		return nil
 	}
 
-	//禁用上下文菜单
-	err = settings.PutAreDefaultContextMenusEnabled(options.Debug)
+	// 右键菜单开关应遵循 WindowOptions，而不是 Debug 标志。
+	err = settings.PutAreDefaultContextMenusEnabled(!options.WindowOptions.DisableContextMenu)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1283,19 +1283,10 @@ func (w *webview) PrintToPDF(path string) {
 
 // ShowPrintDialog 显示打印对话框
 func (w *webview) ShowPrintDialog() {
-	if chromium, ok := w.browser.(*edge.Chromium); ok {
-		var err error
-		// 默认打开浏览器打印预览对话框，更贴近 WebView2 原生能力。
-		w.dispatchSync(func() {
-			err = chromium.ShowPrintUI(edge.COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER)
-		})
-		if err != nil {
-			log.Printf("打开打印对话框失败，回退到 window.print(): %v", err)
-			w.Eval(`window.print()`)
-		}
-		return
+	if err := w.ShowPrintDialogWithKind(PrintDialogKindBrowser); err != nil {
+		log.Printf("打开打印对话框失败，回退到 window.print(): %v", err)
+		w.Eval(`window.print()`)
 	}
-	w.Eval(`window.print()`)
 }
 
 func (w *webview) CapturePreview(path string) error {

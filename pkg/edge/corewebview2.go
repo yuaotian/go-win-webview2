@@ -207,17 +207,27 @@ type ICoreWebView2Environment struct {
 }
 
 func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
-	var err error
-	var stream uintptr
-
+	var stream *w32.IUnknown
 	if len(content) > 0 {
-		// Create stream for response
-		stream, err = w32.SHCreateMemStream(content)
+		// 小响应仍走内存流，保持现有接口兼容。
+		rawStream, err := w32.SHCreateMemStream(content)
 		if err != nil {
 			return nil, err
 		}
+		stream = (*w32.IUnknown)(unsafe.Pointer(rawStream))
 	}
+	return e.CreateWebResourceResponseFromStream(stream, statusCode, reasonPhrase, headers)
+}
 
+func (e *ICoreWebView2Environment) CreateWebResourceResponseFromFile(path string, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
+	stream, err := w32.SHCreateReadFileStream(path)
+	if err != nil {
+		return nil, err
+	}
+	return e.CreateWebResourceResponseFromStream(stream, statusCode, reasonPhrase, headers)
+}
+
+func (e *ICoreWebView2Environment) CreateWebResourceResponseFromStream(stream *w32.IUnknown, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
 	// Convert string 'uri' to *uint16
 	_reason, err := windows.UTF16PtrFromString(reasonPhrase)
 	if err != nil {
@@ -231,12 +241,16 @@ func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, sta
 	var response *ICoreWebView2WebResourceResponse
 	hr, _, _ := e.vtbl.CreateWebResourceResponse.Call(
 		uintptr(unsafe.Pointer(e)),
-		stream,
+		uintptr(unsafe.Pointer(stream)),
 		uintptr(statusCode),
 		uintptr(unsafe.Pointer(_reason)),
 		uintptr(unsafe.Pointer(_headers)),
 		uintptr(unsafe.Pointer(&response)),
 	)
+	if stream != nil {
+		// WebView2 示例以局部 com_ptr 传入 IStream，调用返回后即可释放本地引用。
+		stream.Release()
+	}
 	if int32(hr) < 0 {
 		return nil, fmt.Errorf("create web resource response failed: %08x", hr)
 	}
@@ -244,7 +258,6 @@ func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, sta
 		return nil, errors.New("create web resource response returned nil response")
 	}
 	return response, nil
-
 }
 
 // ICoreWebView2WebMessageReceivedEventArgs
@@ -626,9 +639,8 @@ func (i *ICoreWebView2) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
 	return nil
 }
 
-// ICoreWebView2PrintCompletedHandler
-
-type ICoreWebView2PrintCompletedHandler interface {
+// legacyICoreWebView2PrintCompletedHandler 保留旧占位定义，实际异步打印 handler 已迁移到 ICoreWebView2_print.go。
+type legacyICoreWebView2PrintCompletedHandler interface {
 	Invoke(errorCode int, printStatus int) uintptr
 }
 
