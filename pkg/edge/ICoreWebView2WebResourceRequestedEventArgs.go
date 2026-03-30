@@ -52,3 +52,27 @@ func (i *ICoreWebView2WebResourceRequestedEventArgs) GetRequest() (*ICoreWebView
 	}
 	return request, nil
 }
+
+func (i *ICoreWebView2WebResourceRequestedEventArgs) GetDeferral() (*ICoreWebView2Deferral, error) {
+	var deferral *ICoreWebView2Deferral
+	_, _, err := i.vtbl.GetDeferral.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&deferral)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return nil, err
+	}
+	return deferral, nil
+}
+
+func (i *ICoreWebView2WebResourceRequestedEventArgs) GetResourceContext() (COREWEBVIEW2_WEB_RESOURCE_CONTEXT, error) {
+	var ctx COREWEBVIEW2_WEB_RESOURCE_CONTEXT
+	_, _, err := i.vtbl.GetResourceContext.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&ctx)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return 0, err
+	}
+	return ctx, nil
+}

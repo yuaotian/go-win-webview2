@@ -45,6 +45,7 @@ type Chromium struct {
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
 	newWindowRequested    *ICoreWebView2NewWindowRequestedEventHandler
 	windowCloseRequested  *ICoreWebView2WindowCloseRequestedEventHandler
+	domContentLoaded      *ICoreWebView2DOMContentLoadedEventHandler
 	navigationStarting    *ICoreWebView2NavigationStartingEventHandler
 	sourceChanged         *ICoreWebView2SourceChangedEventHandler
 	documentTitleChanged  *ICoreWebView2DocumentTitleChangedEventHandler
@@ -64,6 +65,7 @@ type Chromium struct {
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NewWindowRequestedCallback   func(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs)
 	WindowCloseRequestedCallback func()
+	DOMContentLoadedCallback     func(sender *ICoreWebView2, args *ICoreWebView2DOMContentLoadedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
 	NavigationStartingCallback   func()
@@ -118,6 +120,7 @@ func NewChromium() *Chromium {
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.windowCloseRequested = newICoreWebView2WindowCloseRequestedEventHandler(e)
+	e.domContentLoaded = newICoreWebView2DOMContentLoadedEventHandler(e)
 	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
 	e.sourceChanged = newICoreWebView2SourceChangedEventHandler(e)
 	e.documentTitleChanged = newICoreWebView2DocumentTitleChangedEventHandler(e)
@@ -287,6 +290,11 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 	if err := e.webview.AddWindowCloseRequested(e.windowCloseRequested, &token); err != nil {
 		log.Fatal(err)
 	}
+	if webview2_2 := e.GetICoreWebView2_2(); webview2_2 != nil {
+		if err := webview2_2.AddDomContentLoaded(e.domContentLoaded, &token); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	// 补齐原生导航、URL 和标题事件，驱动外层状态监听。
 	if err := e.webview.AddNavigationStarting(e.navigationStarting, &token); err != nil {
@@ -387,6 +395,13 @@ func (e *Chromium) WindowCloseRequested(_ *ICoreWebView2, _ *iUnknown) uintptr {
 
 	// 默认沿用现有窗口关闭语义，避免页面 window.close() 变成空操作。
 	_, _, _ = w32.User32PostMessageW.Call(e.hwnd, w32.WMClose, 0, 0)
+	return 0
+}
+
+func (e *Chromium) DOMContentLoaded(sender *ICoreWebView2, args *ICoreWebView2DOMContentLoadedEventArgs) uintptr {
+	if e.DOMContentLoadedCallback != nil {
+		e.DOMContentLoadedCallback(sender, args)
+	}
 	return 0
 }
 
@@ -750,6 +765,10 @@ func (e *Chromium) SubscribeDevToolsProtocolEvent(eventName string, handler func
 	}
 
 	return unsubscribe, nil
+}
+
+func (e *Chromium) SetDOMContentLoadedCallback(callback func(sender *ICoreWebView2, args *ICoreWebView2DOMContentLoadedEventArgs)) {
+	e.DOMContentLoadedCallback = callback
 }
 
 // 添加打印相关的回调处理

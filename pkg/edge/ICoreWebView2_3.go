@@ -46,6 +46,23 @@ func (i *ICoreWebView2_3) SetVirtualHostNameToFolderMapping(hostName, folderPath
 	return nil
 }
 
+func (i *ICoreWebView2_3) ClearVirtualHostNameToFolderMapping(hostName string) error {
+	_hostName, err := windows.UTF16PtrFromString(hostName)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = i.vtbl.ClearVirtualHostNameToFolderMapping.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(_hostName)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+
+	return nil
+}
+
 func (i *ICoreWebView2) GetICoreWebView2_3() *ICoreWebView2_3 {
 	var result *ICoreWebView2_3
 

@@ -44,3 +44,20 @@ func (i *ICoreWebView2WebResourceRequest) GetUri() (string, error) {
 	windows.CoTaskMemFree(unsafe.Pointer(_uri))
 	return uri, nil
 }
+
+func (i *ICoreWebView2WebResourceRequest) GetMethod() (string, error) {
+	var err error
+	var method *uint16
+	_, _, err = i.vtbl.GetMethod.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&method)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return "", err
+	}
+	if method == nil {
+		return "", nil
+	}
+	defer windows.CoTaskMemFree(unsafe.Pointer(method))
+	return windows.UTF16PtrToString(method), nil
+}

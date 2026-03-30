@@ -133,6 +133,13 @@ type WebView interface {
 	CallDevToolsProtocolMethod(method string, paramsJSON string, callback func(error, string)) error
 	SubscribeDevToolsProtocolEvent(eventName string, handler func(string)) (func(), error)
 
+	// 网络请求与本地内容相关方法
+	AddWebResourceRequestedFilter(uri string, context WebResourceContext) error
+	OnWebResourceRequested(func(*WebResourceRequestedEvent))
+	SetVirtualHostNameToFolderMapping(hostName string, folderPath string, accessKind HostResourceAccessKind) error
+	ClearVirtualHostNameToFolderMapping(hostName string) error
+	OnDOMContentLoaded(func(DOMContentLoadedEvent))
+
 	// 右键菜单控制
 	DisableContextMenu() error // 禁用右键菜单
 	EnableContextMenu() error  // 启用右键菜单
