@@ -599,32 +599,23 @@ func (e *Chromium) PrintToPDF(path string) error {
 	if e.webview == nil {
 		return errors.New("webview not initialized")
 	}
-
-	// 转换文件路径为 UTF16
-	_path, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return err
+	webview2_7 := e.GetICoreWebView2_7()
+	if webview2_7 == nil {
+		return errors.New("ICoreWebView2_7 is not available")
 	}
 
-	// 调用 WebView2 的 PrintToPdf 方法
-	_, _, err = e.webview.vtbl.PrintToPdf.Call(
-		uintptr(unsafe.Pointer(e.webview)),
-		uintptr(unsafe.Pointer(_path)),
-		0, // 使用默认打印设置
-	)
-
-	if err != windows.ERROR_SUCCESS {
-		return err
-	}
-
-	return nil
+	return webview2_7.PrintToPdf(path)
 }
 
 func (e *Chromium) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
 	if e.webview == nil {
 		return errors.New("webview not initialized")
 	}
-	return e.webview.ShowPrintUI(kind)
+	webview2_16 := e.GetICoreWebView2_16()
+	if webview2_16 == nil {
+		return errors.New("ICoreWebView2_16 is not available")
+	}
+	return webview2_16.ShowPrintUI(kind)
 }
 
 type capturePreviewRequest struct {
