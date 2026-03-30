@@ -4,6 +4,7 @@
 package edge
 
 import (
+	"fmt"
 	"unsafe"
 
 	"github.com/yuaotian/go-win-webview2/internal/w32"
@@ -77,7 +78,7 @@ func (i *ICoreWebView2Controller) AddAcceleratorKeyPressed(eventHandler *ICoreWe
 	_, _, err = i.vtbl.AddAcceleratorKeyPressed.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(eventHandler)),
-		uintptr(unsafe.Pointer(&token)),
+		uintptr(unsafe.Pointer(token)),
 	)
 	if err != windows.ERROR_SUCCESS {
 		return err
@@ -130,6 +131,14 @@ func (i *ICoreWebView2Controller) MoveFocus(reason uintptr) error {
 	)
 	if err != windows.ERROR_SUCCESS {
 		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2Controller) Close() error {
+	hr, _, _ := i.vtbl.Close.Call(uintptr(unsafe.Pointer(i)))
+	if int32(hr) < 0 {
+		return fmt.Errorf("close controller failed: %08x", hr)
 	}
 	return nil
 }

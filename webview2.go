@@ -40,6 +40,7 @@ func setWindowContext(wnd uintptr, data interface{}) {
 
 type browser interface {
 	Embed(hwnd uintptr) bool
+	Destroy()
 	Resize()
 	Navigate(url string)
 	NavigateToString(htmlContent string)
@@ -557,6 +558,11 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 	_, _, _ = w32.User32SetFocus.Call(w.hwnd)
 
 	if !w.browser.Embed(w.hwnd) {
+		// 初始化失败时同步清理窗口和浏览器对象，避免残留空窗口。
+		w.browser.Destroy()
+		windowContext.Delete(w.hwnd)
+		_, _, _ = w32.User32DestroyWindow.Call(w.hwnd)
+		w.hwnd = 0
 		return false
 	}
 	w.browser.Resize()
@@ -610,6 +616,10 @@ func (w *webview) CreateWithOptions(opts WindowOptions) bool {
 }
 
 func (w *webview) Destroy() {
+	if w.browser != nil {
+		w.browser.Destroy()
+	}
+
 	// 注所有热键
 	w.m.Lock()
 	for id := range w.hotkeys {
@@ -628,7 +638,9 @@ func (w *webview) Destroy() {
 	windowContext.Delete(w.hwnd)
 
 	// 发送关闭消息
-	_, _, _ = w32.User32PostMessageW.Call(w.hwnd, w32.WMClose, 0, 0)
+	if w.hwnd != 0 {
+		_, _, _ = w32.User32PostMessageW.Call(w.hwnd, w32.WMClose, 0, 0)
+	}
 }
 
 func (w *webview) Run() {

@@ -37,6 +37,8 @@ type Chromium struct {
 	controller            *ICoreWebView2Controller
 	webview               *ICoreWebView2
 	inited                uintptr
+	initErr               error
+	initErrMu             sync.Mutex
 	envCompleted          *iCoreWebView2CreateCoreWebView2EnvironmentCompletedHandler
 	controllerCompleted   *iCoreWebView2CreateCoreWebView2ControllerCompletedHandler
 	webMessageReceived    *iCoreWebView2WebMessageReceivedEventHandler
@@ -130,6 +132,24 @@ func NewChromium() *Chromium {
 	return e
 }
 
+// 统一收敛异步初始化结果，确保 Embed 可以可靠退出等待循环。
+func (e *Chromium) finishInitialization(err error) {
+	if err != nil {
+		e.initErrMu.Lock()
+		if e.initErr == nil {
+			e.initErr = err
+		}
+		e.initErrMu.Unlock()
+	}
+	atomic.StoreUintptr(&e.inited, 1)
+}
+
+func (e *Chromium) initializationError() error {
+	e.initErrMu.Lock()
+	defer e.initErrMu.Unlock()
+	return e.initErr
+}
+
 func (e *Chromium) Embed(hwnd uintptr) bool {
 	e.hwnd = hwnd
 
@@ -169,6 +189,17 @@ func (e *Chromium) Embed(hwnd uintptr) bool {
 		}
 		_, _, _ = w32.User32TranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		_, _, _ = w32.User32DispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+	if atomic.LoadUintptr(&e.inited) == 0 {
+		e.finishInitialization(errors.New("WebView2 初始化在完成前被中断"))
+	}
+	if err := e.initializationError(); err != nil {
+		log.Printf("WebView2 初始化失败: %v", err)
+		return false
+	}
+	if e.webview == nil {
+		log.Printf("WebView2 初始化失败: 未返回 CoreWebView2 实例")
+		return false
 	}
 	e.Init("window.external={invoke:s=>window.chrome.webview.postMessage(s)}")
 	return true
@@ -241,31 +272,52 @@ func (e *Chromium) Release() uintptr {
 
 func (e *Chromium) EnvironmentCompleted(res uintptr, env *ICoreWebView2Environment) uintptr {
 	if int64(res) < 0 {
-		log.Fatalf("Creating environment failed with %08x", res)
+		e.finishInitialization(fmt.Errorf("创建 WebView2 environment 失败: %08x", res))
+		return 0
+	}
+	if env == nil {
+		e.finishInitialization(errors.New("创建 WebView2 environment 返回 nil"))
+		return 0
 	}
 	_, _, _ = env.vtbl.AddRef.Call(uintptr(unsafe.Pointer(env)))
 	e.environment = env
 
-	_, _, _ = env.vtbl.CreateCoreWebView2Controller.Call(
+	hr, _, _ := env.vtbl.CreateCoreWebView2Controller.Call(
 		uintptr(unsafe.Pointer(env)),
 		e.hwnd,
 		uintptr(unsafe.Pointer(e.controllerCompleted)),
 	)
+	if int32(hr) < 0 {
+		e.finishInitialization(fmt.Errorf("创建 WebView2 controller 失败: %08x", hr))
+	}
 	return 0
 }
 
 func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller *ICoreWebView2Controller) uintptr {
 	if int64(res) < 0 {
-		log.Fatalf("Creating controller failed with %08x", res)
+		e.finishInitialization(fmt.Errorf("创建 WebView2 controller 失败: %08x", res))
+		return 0
+	}
+	if controller == nil {
+		e.finishInitialization(errors.New("创建 WebView2 controller 返回 nil"))
+		return 0
 	}
 	_, _, _ = controller.vtbl.AddRef.Call(uintptr(unsafe.Pointer(controller)))
 	e.controller = controller
 
 	var token _EventRegistrationToken
-	_, _, _ = controller.vtbl.GetCoreWebView2.Call(
+	hr, _, _ := controller.vtbl.GetCoreWebView2.Call(
 		uintptr(unsafe.Pointer(controller)),
 		uintptr(unsafe.Pointer(&e.webview)),
 	)
+	if int32(hr) < 0 {
+		e.finishInitialization(fmt.Errorf("获取 CoreWebView2 失败: %08x", hr))
+		return 0
+	}
+	if e.webview == nil {
+		e.finishInitialization(errors.New("获取 CoreWebView2 返回 nil"))
+		return 0
+	}
 	_, _, _ = e.webview.vtbl.AddRef.Call(
 		uintptr(unsafe.Pointer(e.webview)),
 	)
@@ -285,40 +337,61 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(&token)),
 	)
 	if err := e.webview.AddNewWindowRequested(e.newWindowRequested, &token); err != nil {
-		log.Fatal(err)
+		e.finishInitialization(fmt.Errorf("注册 NewWindowRequested 失败: %w", err))
+		return 0
 	}
 	if err := e.webview.AddWindowCloseRequested(e.windowCloseRequested, &token); err != nil {
-		log.Fatal(err)
+		e.finishInitialization(fmt.Errorf("注册 WindowCloseRequested 失败: %w", err))
+		return 0
 	}
 	if webview2_2 := e.GetICoreWebView2_2(); webview2_2 != nil {
 		if err := webview2_2.AddDomContentLoaded(e.domContentLoaded, &token); err != nil {
-			log.Fatal(err)
+			e.finishInitialization(fmt.Errorf("注册 DOMContentLoaded 失败: %w", err))
+			return 0
 		}
 	}
 
 	// 补齐原生导航、URL 和标题事件，驱动外层状态监听。
 	if err := e.webview.AddNavigationStarting(e.navigationStarting, &token); err != nil {
-		log.Fatal(err)
+		e.finishInitialization(fmt.Errorf("注册 NavigationStarting 失败: %w", err))
+		return 0
 	}
 	if err := e.webview.AddSourceChanged(e.sourceChanged, &token); err != nil {
-		log.Fatal(err)
+		e.finishInitialization(fmt.Errorf("注册 SourceChanged 失败: %w", err))
+		return 0
 	}
 	if err := e.webview.AddDocumentTitleChanged(e.documentTitleChanged, &token); err != nil {
-		log.Fatal(err)
+		e.finishInitialization(fmt.Errorf("注册 DocumentTitleChanged 失败: %w", err))
+		return 0
 	}
 	if err := e.webview.AddNavigationCompleted(e.navigationCompleted, &token); err != nil {
-		log.Fatal(err)
+		e.finishInitialization(fmt.Errorf("注册 NavigationCompleted 失败: %w", err))
+		return 0
 	}
 
-	_ = e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token)
+	if err := e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token); err != nil {
+		log.Printf("注册 AcceleratorKeyPressed 失败: %v", err)
+	}
 
-	atomic.StoreUintptr(&e.inited, 1)
+	e.finishInitialization(nil)
 
 	if e.focusOnInit {
 		e.Focus()
 	}
 
 	return 0
+}
+
+// 销毁时显式关闭 controller，减少数据目录和浏览器进程残留风险。
+func (e *Chromium) Destroy() {
+	if e.controller != nil {
+		if err := e.controller.Close(); err != nil {
+			log.Printf("关闭 WebView2 controller 失败: %v", err)
+		}
+		e.controller = nil
+	}
+	e.webview = nil
+	e.environment = nil
 }
 
 func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *iCoreWebView2WebMessageReceivedEventArgs) uintptr {
