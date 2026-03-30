@@ -429,17 +429,89 @@ func (i *ICoreWebView2) AddWebResourceRequestedFilter(uri string, resourceContex
 	}
 	return nil
 }
-func (i *ICoreWebView2) AddNavigationCompleted(eventHandler *ICoreWebView2NavigationCompletedEventHandler, token *_EventRegistrationToken) error {
+
+func (i *ICoreWebView2) AddNavigationStarting(eventHandler *ICoreWebView2NavigationStartingEventHandler, token *_EventRegistrationToken) error {
 	var err error
-	_, _, err = i.vtbl.AddNavigationCompleted.Call(
+	_, _, err = i.vtbl.AddNavigationStarting.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(eventHandler)),
-		uintptr(unsafe.Pointer(&token)),
+		uintptr(unsafe.Pointer(token)),
 	)
 	if err != windows.ERROR_SUCCESS {
 		return err
 	}
 	return nil
+}
+
+func (i *ICoreWebView2) AddSourceChanged(eventHandler *ICoreWebView2SourceChangedEventHandler, token *_EventRegistrationToken) error {
+	var err error
+	_, _, err = i.vtbl.AddSourceChanged.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) AddDocumentTitleChanged(eventHandler *ICoreWebView2DocumentTitleChangedEventHandler, token *_EventRegistrationToken) error {
+	var err error
+	_, _, err = i.vtbl.AddDocumentTitleChanged.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) AddNavigationCompleted(eventHandler *ICoreWebView2NavigationCompletedEventHandler, token *_EventRegistrationToken) error {
+	var err error
+	_, _, err = i.vtbl.AddNavigationCompleted.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) GetSource() (string, error) {
+	var source *uint16
+	_, _, err := i.vtbl.GetSource.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&source)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return "", err
+	}
+	if source == nil {
+		return "", nil
+	}
+	defer windows.CoTaskMemFree(unsafe.Pointer(source))
+	return w32.Utf16PtrToString(source), nil
+}
+
+func (i *ICoreWebView2) GetDocumentTitle() (string, error) {
+	var title *uint16
+	_, _, err := i.vtbl.GetDocumentTitle.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&title)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return "", err
+	}
+	if title == nil {
+		return "", nil
+	}
+	defer windows.CoTaskMemFree(unsafe.Pointer(title))
+	return w32.Utf16PtrToString(title), nil
 }
 
 // ICoreWebView2PrintCompletedHandler

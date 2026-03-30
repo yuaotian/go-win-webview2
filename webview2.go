@@ -213,7 +213,6 @@ func NewWithOptions(options WebViewOptions) WebView {
 		return nil
 	}
 
-	
 	//禁用上下文菜单
 	err = settings.PutAreDefaultContextMenusEnabled(options.Debug)
 	if err != nil {
@@ -1102,14 +1101,24 @@ func (w *webview) CloseDevTools() {
 
 func (w *webview) OnLoadingStateChanged(callback func(bool)) {
 	w.onLoadingStateChanged = callback
+	// 将外层状态监听桥接到 Chromium 内部状态回调。
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		chromium.SetLoadingStateChangedCallback(callback)
+	}
 }
 
 func (w *webview) OnURLChanged(callback func(string)) {
 	w.onURLChanged = callback
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		chromium.SetURLChangedCallback(callback)
+	}
 }
 
 func (w *webview) OnTitleChanged(callback func(string)) {
 	w.onTitleChanged = callback
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		chromium.SetTitleChangedCallback(callback)
+	}
 }
 
 func (w *webview) OnFullscreenChanged(callback func(bool)) {
@@ -1447,7 +1456,8 @@ func (w *webview) SendWebSocketMessage(message string) {
 func (w *webview) OnNavigationStarting(handler func()) {
 	if w.browser != nil {
 		if chromium, ok := w.browser.(*edge.Chromium); ok {
-			chromium.NavigationStartingCallback = handler
+			// 走 Chromium 的原生导航开始回调，不再只做字段赋值。
+			chromium.SetNavigationStartingCallback(handler)
 		}
 	}
 }

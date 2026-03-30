@@ -31,6 +31,9 @@ type Chromium struct {
 	permissionRequested   *iCoreWebView2PermissionRequestedEventHandler
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
+	navigationStarting    *ICoreWebView2NavigationStartingEventHandler
+	sourceChanged         *ICoreWebView2SourceChangedEventHandler
+	documentTitleChanged  *ICoreWebView2DocumentTitleChangedEventHandler
 	navigationCompleted   *ICoreWebView2NavigationCompletedEventHandler
 
 	environment *ICoreWebView2Environment
@@ -88,6 +91,9 @@ func NewChromium() *Chromium {
 	e.permissionRequested = newICoreWebView2PermissionRequestedEventHandler(e)
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
+	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
+	e.sourceChanged = newICoreWebView2SourceChangedEventHandler(e)
+	e.documentTitleChanged = newICoreWebView2DocumentTitleChangedEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
@@ -248,11 +254,20 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(e.webResourceRequested)),
 		uintptr(unsafe.Pointer(&token)),
 	)
-	_, _, _ = e.webview.vtbl.AddNavigationCompleted.Call(
-		uintptr(unsafe.Pointer(e.webview)),
-		uintptr(unsafe.Pointer(e.navigationCompleted)),
-		uintptr(unsafe.Pointer(&token)),
-	)
+
+	// 补齐原生导航、URL 和标题事件，驱动外层状态监听。
+	if err := e.webview.AddNavigationStarting(e.navigationStarting, &token); err != nil {
+		log.Fatal(err)
+	}
+	if err := e.webview.AddSourceChanged(e.sourceChanged, &token); err != nil {
+		log.Fatal(err)
+	}
+	if err := e.webview.AddDocumentTitleChanged(e.documentTitleChanged, &token); err != nil {
+		log.Fatal(err)
+	}
+	if err := e.webview.AddNavigationCompleted(e.navigationCompleted, &token); err != nil {
+		log.Fatal(err)
+	}
 
 	_ = e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token)
 
@@ -362,6 +377,43 @@ func (e *Chromium) GetSettings() (*ICoreWebViewSettings, error) {
 
 func (e *Chromium) GetController() *ICoreWebView2Controller {
 	return e.controller
+}
+
+func (e *Chromium) NavigationStarting(sender *ICoreWebView2, _ *ICoreWebView2NavigationStartingEventArgs) uintptr {
+	e.updateState(func(c *Chromium) {
+		c.state.isLoading = true
+	})
+
+	if e.NavigationStartingCallback != nil {
+		e.NavigationStartingCallback()
+	}
+	return 0
+}
+
+func (e *Chromium) SourceChanged(sender *ICoreWebView2, _ *ICoreWebView2SourceChangedEventArgs) uintptr {
+	source, err := sender.GetSource()
+	if err != nil {
+		log.Printf("读取当前 URL 失败: %v", err)
+		return 0
+	}
+
+	e.updateState(func(c *Chromium) {
+		c.state.currentURL = source
+	})
+	return 0
+}
+
+func (e *Chromium) DocumentTitleChanged(sender *ICoreWebView2, _ *iUnknown) uintptr {
+	title, err := sender.GetDocumentTitle()
+	if err != nil {
+		log.Printf("读取当前标题失败: %v", err)
+		return 0
+	}
+
+	e.updateState(func(c *Chromium) {
+		c.state.currentTitle = title
+	})
+	return 0
 }
 
 func (e *Chromium) NavigationCompleted(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs) uintptr {
@@ -524,6 +576,25 @@ func (e *Chromium) HandleWebMessage(message string) {
 // 添加消息处理回调设置方法
 func (e *Chromium) SetMessageCallback(callback func(string)) {
 	e.MessageCallback = callback
+}
+
+// 供 webview 层桥接外部状态监听到 Chromium 内部事件。
+func (e *Chromium) SetLoadingStateChangedCallback(callback func(bool)) {
+	e.callbacks.Lock()
+	defer e.callbacks.Unlock()
+	e.callbacks.onLoadingStateChanged = callback
+}
+
+func (e *Chromium) SetURLChangedCallback(callback func(string)) {
+	e.callbacks.Lock()
+	defer e.callbacks.Unlock()
+	e.callbacks.onURLChanged = callback
+}
+
+func (e *Chromium) SetTitleChangedCallback(callback func(string)) {
+	e.callbacks.Lock()
+	defer e.callbacks.Unlock()
+	e.callbacks.onTitleChanged = callback
 }
 
 // 加状态管理方法
