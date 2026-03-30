@@ -5,6 +5,7 @@ package webview2
 
 import (
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/yuaotian/go-win-webview2/pkg/edge"
@@ -66,9 +67,12 @@ func (e *WebResourceRequestedEvent) SetResponse(response WebResourceResponse) er
 	}
 	webResourceResponse, err := e.env.CreateWebResourceResponse(response.Content, response.StatusCode, response.ReasonPhrase, response.Headers)
 	if err != nil {
-		return err
+		return fmt.Errorf("create web resource response failed: %w", err)
 	}
-	return e.args.PutResponse(webResourceResponse)
+	if err := e.args.PutResponse(webResourceResponse); err != nil {
+		return fmt.Errorf("put web resource response failed: %w", err)
+	}
+	return nil
 }
 
 func (e *WebResourceRequestedEvent) GetDeferral() (*WebViewDeferral, error) {
