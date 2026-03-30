@@ -5,13 +5,24 @@ package main
 
 import (
 	"log"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	webview2 "github.com/yuaotian/go-win-webview2"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 )
+
+// 通过主线程发送 WM_CLOSE，确保 smoke 按正常窗口关闭链路收尾。
+func requestClose(w webview2.WebView) {
+	w.Dispatch(func() {
+		hwnd := uintptr(w.Window())
+		if hwnd == 0 {
+			return
+		}
+		_, _, _ = w32.User32PostMessageW.Call(hwnd, w32.WMClose, 0, 0)
+	})
+}
 
 func main() {
 	var sawNewWindow atomic.Bool
@@ -48,7 +59,6 @@ func main() {
 	w.OnWindowCloseRequested(func() {
 		log.Printf("收到窗口关闭请求")
 		sawWindowClose.Store(true)
-		w.Terminate()
 	})
 
 	w.OnLoadingStateChanged(func(isLoading bool) {
@@ -78,33 +88,27 @@ func main() {
 				log.Printf("调用 Runtime.evaluate 失败: %v", err)
 			}
 
-			if err := w.CallDevToolsProtocolMethod("Security.enable", `{}`, func(err error, result string) {
-				if err != nil {
-					log.Printf("启用 Security 域失败: %v", err)
-					return
-				}
-				log.Printf("Security.enable 返回: %s", result)
-
-				var subscribeErr error
-				unsubscribe, subscribeErr = w.SubscribeDevToolsProtocolEvent("Security.securityStateChanged", func(json string) {
-					log.Printf("收到 DevTools 事件: %s", json)
+			var subscribeErr error
+			unsubscribe, subscribeErr = w.SubscribeDevToolsProtocolEvent("Runtime.consoleAPICalled", func(json string) {
+				log.Printf("收到 DevTools 事件: %s", json)
+				if strings.Contains(json, "runtime-advanced-event") {
 					sawDevToolsEvent.Store(true)
-				})
-				if subscribeErr != nil {
-					log.Printf("订阅 DevTools 事件失败: %v", subscribeErr)
 				}
-
-				w.Eval(`
-					setTimeout(function () {
-						window.open("about:blank#popup", "_blank");
-					}, 80);
-					setTimeout(function () {
-						window.close();
-					}, 220);
-				`)
-			}); err != nil {
-				log.Printf("调用 Security.enable 失败: %v", err)
+			})
+			if subscribeErr != nil {
+				log.Printf("订阅 DevTools 事件失败: %v", subscribeErr)
+				return
 			}
+
+			w.Eval(`
+				console.log("runtime-advanced-event");
+				setTimeout(function () {
+					window.open("about:blank#popup", "_blank");
+				}, 80);
+				setTimeout(function () {
+					window.close();
+				}, 220);
+			`)
 		}); err != nil {
 			log.Printf("调用 Runtime.enable 失败: %v", err)
 		}
@@ -139,7 +143,7 @@ func main() {
 		}
 
 		log.Printf("advanced smoke 验证通过")
-		os.Exit(0)
+		requestClose(w)
 	})
 
 	w.Run()

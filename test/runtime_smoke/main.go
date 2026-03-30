@@ -12,7 +12,19 @@ import (
 	"time"
 
 	webview2 "github.com/yuaotian/go-win-webview2"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 )
+
+// 通过主线程发送 WM_CLOSE，确保 smoke 按正常窗口关闭链路收尾。
+func requestClose(w webview2.WebView) {
+	w.Dispatch(func() {
+		hwnd := uintptr(w.Window())
+		if hwnd == 0 {
+			return
+		}
+		_, _, _ = w32.User32PostMessageW.Call(hwnd, w32.WMClose, 0, 0)
+	})
+}
 
 func main() {
 	previewPath := filepath.Join(os.TempDir(), "go-win-webview2-runtime-smoke.png")
@@ -72,10 +84,6 @@ func main() {
 			} else {
 				log.Printf("跳过 DevTools 自动验证，避免阻塞 smoke 流程")
 			}
-
-			time.AfterFunc(1200*time.Millisecond, func() {
-				w.Terminate()
-			})
 		})
 	})
 
@@ -110,7 +118,7 @@ func main() {
 		}
 
 		log.Printf("运行态 smoke 验证通过，截图文件：%s", previewPath)
-		os.Exit(0)
+		requestClose(w)
 	})
 
 	w.Run()

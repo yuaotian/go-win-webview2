@@ -11,7 +11,19 @@ import (
 	"time"
 
 	webview2 "github.com/yuaotian/go-win-webview2"
+	"github.com/yuaotian/go-win-webview2/internal/w32"
 )
+
+// 通过主线程发送 WM_CLOSE，确保 smoke 按正常窗口关闭链路收尾。
+func requestClose(w webview2.WebView) {
+	w.Dispatch(func() {
+		hwnd := uintptr(w.Window())
+		if hwnd == 0 {
+			return
+		}
+		_, _, _ = w32.User32PostMessageW.Call(hwnd, w32.WMClose, 0, 0)
+	})
+}
 
 func main() {
 	tempDir, err := os.MkdirTemp("", "go-win-webview2-mapped-*")
@@ -107,13 +119,15 @@ func main() {
 					log.Printf("设置虚拟主机映射失败: %v", err)
 					return
 				}
-				w.Navigate("https://mapped.example/index.html")
+				// 导航切回 UI 线程执行，避免在定时器 goroutine 里直接操作 WebView。
+				w.Dispatch(func() {
+					w.Navigate("https://mapped.example/index.html")
+				})
 			})
 		}
 
 		if title == "mapped-ready" {
 			sawMapped.Store(true)
-			w.Terminate()
 		}
 	})
 
@@ -130,7 +144,7 @@ func main() {
 			log.Fatal("DOMContentLoaded 次数不足，未覆盖两段导航")
 		}
 		log.Printf("resource smoke 验证通过")
-		os.Exit(0)
+		requestClose(w)
 	})
 
 	w.Run()

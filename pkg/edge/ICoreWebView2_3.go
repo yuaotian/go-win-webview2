@@ -4,6 +4,7 @@
 package edge
 
 import (
+	"fmt"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -33,12 +34,15 @@ func (i *ICoreWebView2_3) SetVirtualHostNameToFolderMapping(hostName, folderPath
 		return err
 	}
 
-	_, _, err = i.vtbl.SetVirtualHostNameToFolderMapping.Call(
+	hr, _, err := i.vtbl.SetVirtualHostNameToFolderMapping.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(_hostName)),
 		uintptr(unsafe.Pointer(_folderPath)),
 		uintptr(accessKind),
 	)
+	if int32(hr) < 0 {
+		return fmt.Errorf("set virtual host name to folder mapping failed: %08x", hr)
+	}
 	if err != windows.ERROR_SUCCESS {
 		return err
 	}
@@ -52,10 +56,13 @@ func (i *ICoreWebView2_3) ClearVirtualHostNameToFolderMapping(hostName string) e
 		return err
 	}
 
-	_, _, err = i.vtbl.ClearVirtualHostNameToFolderMapping.Call(
+	hr, _, err := i.vtbl.ClearVirtualHostNameToFolderMapping.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(_hostName)),
 	)
+	if int32(hr) < 0 {
+		return fmt.Errorf("clear virtual host name to folder mapping failed: %08x", hr)
+	}
 	if err != windows.ERROR_SUCCESS {
 		return err
 	}

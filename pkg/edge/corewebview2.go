@@ -74,7 +74,8 @@ type _IUnknownImpl interface {
 
 // ICoreWebView2
 
-type iCoreWebView2Vtbl struct {
+// 官方 base 接口到 WindowCloseRequested 为止，供后续派生接口嵌入。
+type iCoreWebView2BaseVtbl struct {
 	_IUnknownVtbl
 
 	// 基础设置和导航控制
@@ -123,16 +124,16 @@ type iCoreWebView2Vtbl struct {
 	RemoveWebMessageReceived ComProc
 
 	// 开发者工具和浏览器进程
-	CallDevToolsProtocolMethod       ComProc
-	GetBrowserProcessID              ComProc
-	GetDevToolsProtocolEventReceiver ComProc
+	CallDevToolsProtocolMethod ComProc
+	GetBrowserProcessID        ComProc
 
 	// 导航历史控制
-	GetCanGoBack    ComProc
-	GetCanGoForward ComProc
-	GoBack          ComProc
-	GoForward       ComProc
-	Stop            ComProc
+	GetCanGoBack                     ComProc
+	GetCanGoForward                  ComProc
+	GoBack                           ComProc
+	GoForward                        ComProc
+	GetDevToolsProtocolEventReceiver ComProc
+	Stop                             ComProc
 
 	// 窗口和文档标题管理
 	AddNewWindowRequested      ComProc
@@ -160,6 +161,11 @@ type iCoreWebView2Vtbl struct {
 	// 窗口关闭处理
 	AddWindowCloseRequested    ComProc
 	RemoveWindowCloseRequested ComProc
+}
+
+// 当前仓库仍直接把打印相关能力挂在 ICoreWebView2 包装上，先保留对外形态。
+type iCoreWebView2Vtbl struct {
+	iCoreWebView2BaseVtbl
 
 	// 打印功能
 	PrintToPdf           ComProc

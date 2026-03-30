@@ -130,12 +130,14 @@ func (w *webview) OnWebResourceRequested(callback func(*WebResourceRequestedEven
 
 func (w *webview) SetVirtualHostNameToFolderMapping(hostName string, folderPath string, accessKind HostResourceAccessKind) error {
 	if chromium, ok := w.browser.(*edge.Chromium); ok {
-		webview2_3 := chromium.GetICoreWebView2_3()
-		if webview2_3 == nil {
-			return errors.New("ICoreWebView2_3 is not available")
-		}
 		var err error
+		// 扩展接口和实际调用都放到主线程里，避免跨线程复用 COM 指针。
 		w.dispatchSync(func() {
+			webview2_3 := chromium.GetICoreWebView2_3()
+			if webview2_3 == nil {
+				err = errors.New("ICoreWebView2_3 is not available")
+				return
+			}
 			err = webview2_3.SetVirtualHostNameToFolderMapping(hostName, folderPath, edge.COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND(accessKind))
 		})
 		return err
@@ -145,12 +147,14 @@ func (w *webview) SetVirtualHostNameToFolderMapping(hostName string, folderPath 
 
 func (w *webview) ClearVirtualHostNameToFolderMapping(hostName string) error {
 	if chromium, ok := w.browser.(*edge.Chromium); ok {
-		webview2_3 := chromium.GetICoreWebView2_3()
-		if webview2_3 == nil {
-			return errors.New("ICoreWebView2_3 is not available")
-		}
 		var err error
+		// 扩展接口和实际调用都放到主线程里，避免跨线程复用 COM 指针。
 		w.dispatchSync(func() {
+			webview2_3 := chromium.GetICoreWebView2_3()
+			if webview2_3 == nil {
+				err = errors.New("ICoreWebView2_3 is not available")
+				return
+			}
 			err = webview2_3.ClearVirtualHostNameToFolderMapping(hostName)
 		})
 		return err
