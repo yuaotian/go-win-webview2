@@ -19,6 +19,7 @@ var htmlTest embed.FS
 func main() {
 	var isFullscreen, isTopmost bool
 
+	// 更高级的能力演示请查看 demo/advanced/advanced_demo.go
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     true,
 		AutoFocus: true,

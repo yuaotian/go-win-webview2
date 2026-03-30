@@ -752,6 +752,114 @@ w.Init(`
 `)
 ```
 
+## 🆕 最近完成能力
+
+最近几轮已经补进来的能力，和对应方向如下：
+
+- 动态 URL / 标题 / 加载状态监听增强
+- `CapturePreview` / `CapturePreviewWithOptions`
+- `OnNewWindowRequested` / `OnWindowCloseRequested`
+- `CallDevToolsProtocolMethod`
+- `AddWebResourceRequestedFilter` / `OnWebResourceRequested`
+- `SetVirtualHostNameToFolderMapping` / `ClearVirtualHostNameToFolderMapping`
+- `OnDOMContentLoaded`
+
+### 当前运行态状态
+
+基于当前 smoke 结果，建议按下面理解这些能力：
+
+- 已跑通：
+  - 动态 URL 监听
+  - 截图预览
+  - `CallDevToolsProtocolMethod`
+  - `OnNewWindowRequested`
+  - `OnWindowCloseRequested`
+  - 请求拦截主文档 / API mock
+- 仍在继续深挖：
+  - `SubscribeDevToolsProtocolEvent`
+  - `SetVirtualHostNameToFolderMapping`
+  - 依赖虚拟主机映射的 `OnDOMContentLoaded` 第二阶段运行态验证
+
+### 高级能力示例
+
+#### 新窗口请求 / 页面关闭请求
+```go
+w.OnNewWindowRequested(func(event *webview2.NewWindowRequestedEvent) {
+    log.Printf("收到新窗口请求: uri=%s userInitiated=%v", event.URI, event.IsUserInitiated)
+    _ = event.Block()
+})
+
+w.OnWindowCloseRequested(func() {
+    log.Printf("收到页面关闭请求")
+    w.Terminate()
+})
+```
+
+#### DevTools Protocol Method
+```go
+err := w.CallDevToolsProtocolMethod("Runtime.evaluate", `{"expression":"document.title"}`, func(err error, result string) {
+    if err != nil {
+        log.Printf("Runtime.evaluate 失败: %v", err)
+        return
+    }
+    log.Printf("Runtime.evaluate 返回: %s", result)
+})
+if err != nil {
+    log.Printf("发起 Runtime.evaluate 失败: %v", err)
+}
+```
+
+#### 请求拦截 API
+```go
+_ = w.AddWebResourceRequestedFilter("https://app.local/*", webview2.WebResourceContextAll)
+
+w.OnWebResourceRequested(func(event *webview2.WebResourceRequestedEvent) {
+    if event.URI == "https://app.local/api/data" {
+        _ = event.SetResponse(webview2.WebResourceResponse{
+            Content:      []byte(`{"status":"ok"}`),
+            StatusCode:   200,
+            ReasonPhrase: "OK",
+            Headers:      "Content-Type: application/json; charset=utf-8\r\n",
+        })
+    }
+})
+```
+
+#### 虚拟主机映射 / DOMContentLoaded
+```go
+w.OnDOMContentLoaded(func(event webview2.DOMContentLoadedEvent) {
+    log.Printf("DOMContentLoaded: %d", event.NavigationID)
+})
+
+// 当前本机运行态里，虚拟主机映射仍在继续深挖，下面是目标调用方式。
+_ = w.SetVirtualHostNameToFolderMapping(
+    "demo.example",
+    "C:/replace/with/real/path",
+    webview2.HostResourceAccessKindAllow,
+)
+```
+
+#### 截图增强版
+```go
+_ = w.CapturePreviewWithOptions("preview.png", webview2.CapturePreviewOptions{
+    Format: webview2.CapturePreviewFormatPNG,
+})
+```
+
+### Demo 入口
+
+为了不把原有基础 demo 塞得过于臃肿，新增高级能力示例建议查看：
+
+- `demo/advanced/advanced_demo.go`
+
+基础能力仍以：
+
+- `demo/demo.go`
+- `demo/window/window_demo.go`
+- `demo/hook/hook_demo.go`
+
+这几个示例为主。
+
 ## 🛠 性能优化
 
 ### 内存管理
@@ -1006,6 +1114,10 @@ func (app *Application) sendSecureMessage(payload interface{}) {
 | `Stop()` | 停止加载 |
 | `ClearCache()` | 清除缓存 |
 | `ClearCookies()` | 清除Cookies |
+| `AddWebResourceRequestedFilter(uri, context)` | 注册网络请求拦截过滤器 |
+| `OnWebResourceRequested(handler)` | 监听并改写网络请求 |
+| `SetVirtualHostNameToFolderMapping(host, path, accessKind)` | 将本地目录映射为虚拟主机 |
+| `ClearVirtualHostNameToFolderMapping(host)` | 清除虚拟主机映射 |
 
 ### 开发工具
 | API | 描述 |
@@ -1014,6 +1126,21 @@ func (app *Application) sendSecureMessage(payload interface{}) {
 | `CloseDevTools()` | 关闭开发者工具 |
 | `DisableContextMenu()` | 禁用右键菜单 |
 | `EnableContextMenu()` | 启用右键菜单 |
+| `CallDevToolsProtocolMethod(method, paramsJSON, callback)` | 调用 DevTools Protocol 方法 |
+| `SubscribeDevToolsProtocolEvent(eventName, handler)` | 订阅 DevTools Protocol 事件 |
+
+### 高级事件
+| API | 描述 |
+|-----|------|
+| `OnNewWindowRequested(handler)` | 监听页面请求打开新窗口 |
+| `OnWindowCloseRequested(handler)` | 监听页面请求关闭窗口 |
+| `OnDOMContentLoaded(handler)` | 监听页面 DOMContentLoaded |
+
+### 截图与预览
+| API | 描述 |
+|-----|------|
+| `CapturePreview(path)` | 截图当前视口到文件 |
+| `CapturePreviewWithOptions(path, options)` | 按选项截图到文件 |
 
 ### WebSocket相关
 | API | 描述 |
@@ -1072,6 +1199,71 @@ w.Init(`
     connectWebSocket();
 `)
 ```
+
+### Q: 最近新增的高级能力应该怎么手动验证?
+
+建议按下面顺序逐项验证：
+
+1. `OnNewWindowRequested / OnWindowCloseRequested`
+
+验证方式：
+
+- 运行 `demo/advanced/advanced_demo.go`
+- 点击“测试新窗口请求”按钮
+- 预期结果：
+  - 控制台打印 `收到新窗口请求`
+  - 没有真的弹出新窗口（因为 demo 默认阻止）
+- 再点击“测试窗口关闭请求”按钮
+- 预期结果：
+  - 控制台打印 `收到页面关闭请求`
+  - 当前窗口退出
+
+2. `CallDevToolsProtocolMethod`
+
+验证方式：
+
+- 运行 `demo/advanced/advanced_demo.go`
+- 启动后直接观察控制台
+- 预期结果：
+  - 打印 `Runtime.enable 返回: ...`
+  - 打印 `Runtime.evaluate 返回: ...`
+
+3. 请求拦截 API
+
+验证方式：
+
+- 运行 `demo/advanced/advanced_demo.go`
+- 观察页面是否正常加载高级演示页
+- 预期结果：
+  - 控制台打印 `拦截主文档请求`
+  - 控制台打印 `拦截 API 请求`
+  - 页面中出现请求返回的 JSON 结果
+
+4. `CapturePreview / CapturePreviewWithOptions`
+
+验证方式：
+
+- 运行 `demo/advanced/advanced_demo.go`
+- 等待 2 秒
+- 预期结果：
+  - 控制台打印 `截图请求已发出`
+  - 当前工作目录出现 `advanced-demo-preview.png`
+
+5. `SubscribeDevToolsProtocolEvent`
+
+当前状态：
+
+- 已经接好公开 API
+- 当前本机运行态仍在继续深挖
+- 如果运行 demo 时看到 `订阅 DevTools 事件失败（当前仍在深挖）`，这是当前已知状态，不是 README 过时
+
+6. `SetVirtualHostNameToFolderMapping / OnDOMContentLoaded`
+
+当前状态：
+
+- 代码已接通
+- 运行态仍在继续深挖
+- 当前 demo 里只保留目标调用方式，不默认执行
 
 ## 🤝 贡献指南
 
