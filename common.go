@@ -121,9 +121,10 @@ type WebView interface {
 	OnNavigationStarting(func())                 // 导航开始
 
 	// 打印相关方法
-	Print()                 // 直接打印
-	PrintToPDF(path string) // 打印到 PDF 文件
-	ShowPrintDialog()       // 显示打印对话框
+	Print()                           // 直接打印
+	PrintToPDF(path string)           // 打印到 PDF 文件
+	ShowPrintDialog()                 // 显示打印对话框
+	CapturePreview(path string) error // 截图当前视口到文件
 
 	// 右键菜单控制
 	DisableContextMenu() error // 禁用右键菜单

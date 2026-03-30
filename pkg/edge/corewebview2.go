@@ -514,6 +514,27 @@ func (i *ICoreWebView2) GetDocumentTitle() (string, error) {
 	return w32.Utf16PtrToString(title), nil
 }
 
+func (i *ICoreWebView2) OpenDevToolsWindow() error {
+	_, _, err := i.vtbl.OpenDevToolsWindow.Call(
+		uintptr(unsafe.Pointer(i)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
+	_, _, err := i.vtbl.ShowPrintUI.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(kind),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
 // ICoreWebView2PrintCompletedHandler
 
 type ICoreWebView2PrintCompletedHandler interface {

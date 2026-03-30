@@ -25,3 +25,5 @@ src/cache/
 # 确保不忽略 assets 目录
 !assets/
 !assets/logo.svg
+
+docs/

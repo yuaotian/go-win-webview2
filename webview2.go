@@ -147,7 +147,10 @@ type WebViewOptions struct {
 
 // New 在新窗口中创建个新的 webview。
 func New(debug bool) WebView {
-	return NewWithOptions(WebViewOptions{Debug: debug})
+	return NewWithOptions(WebViewOptions{
+		Debug:         debug,
+		WindowOptions: DefaultWindowOptions(),
+	})
 
 }
 
@@ -155,39 +158,16 @@ func New(debug bool) WebView {
 //
 // 已弃用：使用 NewWithOptions。
 func NewWindow(debug bool, window unsafe.Pointer) WebView {
-	return NewWithOptions(WebViewOptions{Debug: debug, Window: window})
+	return NewWithOptions(WebViewOptions{
+		Debug:         debug,
+		Window:        window,
+		WindowOptions: DefaultWindowOptions(),
+	})
 }
 
 // NewWithOptions 使用提供的选项创建一个的 webview。
 func NewWithOptions(options WebViewOptions) WebView {
-	// 合并默认选项
-	defaultOpts := DefaultWindowOptions()
-	if options.WindowOptions.Title == "" {
-		options.WindowOptions.Title = defaultOpts.Title
-	}
-	if options.WindowOptions.Width == 0 {
-		options.WindowOptions.Width = defaultOpts.Width
-	}
-	if options.WindowOptions.Height == 0 {
-		options.WindowOptions.Height = defaultOpts.Height
-	}
-	// 默认居中显示
-	if !options.WindowOptions.Center {
-		options.WindowOptions.Center = defaultOpts.Center
-	}
-	// 合并其他默认选项
-	if !options.WindowOptions.Resizable {
-		options.WindowOptions.Resizable = defaultOpts.Resizable
-	}
-	if !options.WindowOptions.Minimizable {
-		options.WindowOptions.Minimizable = defaultOpts.Minimizable
-	}
-	if !options.WindowOptions.Maximizable {
-		options.WindowOptions.Maximizable = defaultOpts.Maximizable
-	}
-	if options.WindowOptions.DefaultBackground == "" {
-		options.WindowOptions.DefaultBackground = defaultOpts.DefaultBackground
-	}
+	options.WindowOptions = normalizeWindowOptions(options.WindowOptions)
 
 	w := &webview{
 		ctx:     context.Background(),
@@ -197,11 +177,11 @@ func NewWithOptions(options WebViewOptions) WebView {
 	w.autofocus = options.AutoFocus
 
 	chromium := edge.NewChromium()
-	chromium.MessageCallback = w.msgcb
 	chromium.DataPath = options.DataPath
 	chromium.SetPermission(edge.CoreWebView2PermissionKindClipboardRead, edge.CoreWebView2PermissionStateAllow)
 
 	w.browser = chromium
+	chromium.SetMessageCallback(w.handleMessage)
 	w.mainthread, _, _ = w32.Kernel32GetCurrentThreadID.Call()
 	if !w.CreateWithOptions(options.WindowOptions) {
 		return nil
@@ -224,14 +204,31 @@ func NewWithOptions(options WebViewOptions) WebView {
 		log.Fatal(err)
 	}
 
-	// 设置默认消息处理
-	w.SetMessageCallback(func(msg string) {
-		if chromium, ok := w.browser.(*edge.Chromium); ok {
-			chromium.HandleWebMessage(msg)
-		}
-	})
+	// 默认注入基础桥接脚本，确保动态 URL 和状态监听在未显式调用 Init 时也可用。
+	w.Init("")
 
 	return w
+}
+
+func normalizeWindowOptions(options WindowOptions) WindowOptions {
+	defaultOpts := DefaultWindowOptions()
+	// 仅在完全未提供 WindowOptions 时应用整套默认值，避免把显式 false 覆盖回默认值。
+	if reflect.DeepEqual(options, WindowOptions{}) {
+		return defaultOpts
+	}
+	if options.Title == "" {
+		options.Title = defaultOpts.Title
+	}
+	if options.Width == 0 {
+		options.Width = defaultOpts.Width
+	}
+	if options.Height == 0 {
+		options.Height = defaultOpts.Height
+	}
+	if options.DefaultBackground == "" {
+		options.DefaultBackground = defaultOpts.DefaultBackground
+	}
+	return options
 }
 
 type rpcMessage struct {
@@ -242,11 +239,36 @@ type rpcMessage struct {
 
 func jsString(v interface{}) string { b, _ := json.Marshal(v); return string(b) }
 
-func (w *webview) msgcb(msg string) {
+// 内部消息路由优先处理调度、RPC 和状态消息，最后才交给额外消息回调。
+func (w *webview) handleMessage(msg string) {
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		if chromium.HandleDispatchMessage(msg) {
+			return
+		}
+	}
+
+	if w.msgcb(msg) {
+		return
+	}
+
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		if chromium.HandleWebMessage(msg) {
+			return
+		}
+	}
+
+	if w.messageCallback != nil {
+		w.messageCallback(msg)
+	}
+}
+
+func (w *webview) msgcb(msg string) bool {
 	d := rpcMessage{}
 	if err := json.Unmarshal([]byte(msg), &d); err != nil {
-		log.Printf("Error unmarshaling RPC message: %v", err)
-		return
+		return false
+	}
+	if d.Method == "" {
+		return false
 	}
 
 	id := strconv.Itoa(d.ID)
@@ -267,6 +289,7 @@ func (w *webview) msgcb(msg string) {
 			w.Eval(fmt.Sprintf("%s(%s); %s", resolveScript, string(b), cleanupScript))
 		})
 	}
+	return true
 }
 
 func (w *webview) callbinding(d rpcMessage) (interface{}, error) {
@@ -709,10 +732,53 @@ func (w *webview) Init(js string) {
 			navigate: function(url) {
 				window.chrome.webview.postMessage(JSON.stringify({
 					type: 'navigate',
-					url: url
+					payload: { url: url }
 				}));
 			}
 		};
+
+		if (!window.__webview2StateHookInstalled) {
+			window.__webview2StateHookInstalled = true;
+
+			const notifyStateChange = function(loading) {
+				window.chrome.webview.postMessage(JSON.stringify({
+					type: 'stateChange',
+					payload: {
+						loading: !!loading,
+						url: window.location.href,
+						title: document.title
+					}
+				}));
+			};
+
+			const wrapHistory = function(methodName) {
+				const original = history[methodName];
+				history[methodName] = function() {
+					const result = original.apply(this, arguments);
+					notifyStateChange(false);
+					return result;
+				};
+			};
+
+			wrapHistory('pushState');
+			wrapHistory('replaceState');
+
+			window.addEventListener('hashchange', function() {
+				notifyStateChange(false);
+			});
+
+			window.addEventListener('popstate', function() {
+				notifyStateChange(false);
+			});
+
+			document.addEventListener('readystatechange', function() {
+				notifyStateChange(document.readyState !== 'complete');
+			});
+
+			window.addEventListener('load', function() {
+				notifyStateChange(false);
+			});
+		}
 	`
 
 	// 合并脚本
@@ -1088,9 +1154,15 @@ func (w *webview) Stop() {
 
 // 开发者工具
 func (w *webview) OpenDevTools() {
-	if w.browser != nil {
-		// 需要实现 OpenDevToolsWindow 方法
-		//w.browser.OpenDevToolsWindow()
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		var err error
+		// 走 WebView2 原生 DevTools 能力，避免 API 继续空实现。
+		w.dispatchSync(func() {
+			err = chromium.OpenDevToolsWindow()
+		})
+		if err != nil {
+			log.Printf("打开开发者工具失败: %v", err)
+		}
 	}
 }
 
@@ -1163,6 +1235,21 @@ func (w *webview) DispatchAsync(f func()) {
 	}()
 }
 
+func (w *webview) dispatchSync(f func()) {
+	currentThread, _, _ := w32.Kernel32GetCurrentThreadID.Call()
+	if currentThread == w.mainthread {
+		f()
+		return
+	}
+
+	done := make(chan struct{})
+	w.Dispatch(func() {
+		f()
+		close(done)
+	})
+	<-done
+}
+
 // Print 直接使用默认打印机打印前页面
 func (w *webview) Print() {
 	w.Eval(`window.print()`)
@@ -1172,7 +1259,11 @@ func (w *webview) Print() {
 func (w *webview) PrintToPDF(path string) {
 	// 使用 WebView2 的 PrintToPdf 方法
 	if w.browser != nil {
-		if err := w.browser.PrintToPDF(path); err != nil {
+		var err error
+		w.dispatchSync(func() {
+			err = w.browser.PrintToPDF(path)
+		})
+		if err != nil {
 			log.Printf("Failed to print to PDF: %v", err)
 		}
 	}
@@ -1180,7 +1271,31 @@ func (w *webview) PrintToPDF(path string) {
 
 // ShowPrintDialog 显示打印对话框
 func (w *webview) ShowPrintDialog() {
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		var err error
+		// 默认打开浏览器打印预览对话框，更贴近 WebView2 原生能力。
+		w.dispatchSync(func() {
+			err = chromium.ShowPrintUI(edge.COREWEBVIEW2_PRINT_DIALOG_KIND_BROWSER)
+		})
+		if err != nil {
+			log.Printf("打开打印对话框失败，回退到 window.print(): %v", err)
+			w.Eval(`window.print()`)
+		}
+		return
+	}
 	w.Eval(`window.print()`)
+}
+
+func (w *webview) CapturePreview(path string) error {
+	if chromium, ok := w.browser.(*edge.Chromium); ok {
+		var err error
+		// 使用原生截图接口将当前视口写入文件。
+		w.dispatchSync(func() {
+			err = chromium.CapturePreview(path)
+		})
+		return err
+	}
+	return errors.New("browser does not support capture preview")
 }
 
 // DisableContextMenu 禁用右键菜单
@@ -1468,8 +1583,6 @@ func (w *webview) Browser() interface{} {
 
 // 设置消息回调
 func (w *webview) SetMessageCallback(callback func(string)) {
+	// 保留内部消息路由，只额外挂一个未被内部消费的消息回调。
 	w.messageCallback = callback
-	if chromium, ok := w.browser.(*edge.Chromium); ok {
-		chromium.SetMessageCallback(callback)
-	}
 }

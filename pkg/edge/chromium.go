@@ -6,6 +6,7 @@ package edge
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"log"
 	"os"
@@ -16,6 +17,17 @@ import (
 
 	"github.com/yuaotian/go-win-webview2/internal/w32"
 	"golang.org/x/sys/windows"
+)
+
+var (
+	shlwapi                    = windows.NewLazySystemDLL("shlwapi.dll")
+	shCreateStreamOnFileExProc = shlwapi.NewProc("SHCreateStreamOnFileEx")
+)
+
+const (
+	stgmWrite          = 0x00000001
+	stgmShareExclusive = 0x00000010
+	stgmCreate         = 0x00001000
 )
 
 // Chromium 结构体定义
@@ -69,6 +81,13 @@ type Chromium struct {
 		onFullscreenChanged   func(bool)
 		sync.RWMutex
 	}
+
+	dispatch struct {
+		queue []func()
+		sync.Mutex
+	}
+
+	previewRequests sync.Map
 }
 
 func NewChromium() *Chromium {
@@ -444,6 +463,13 @@ func (e *Chromium) Focus() {
 	_ = e.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
 }
 
+func (e *Chromium) OpenDevToolsWindow() error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+	return e.webview.OpenDevToolsWindow()
+}
+
 // PrintToPDF 将当前页面打印到 PDF 文件
 func (e *Chromium) PrintToPDF(path string) error {
 	if e.webview == nil {
@@ -465,6 +491,95 @@ func (e *Chromium) PrintToPDF(path string) error {
 
 	if err != windows.ERROR_SUCCESS {
 		return err
+	}
+
+	return nil
+}
+
+func (e *Chromium) ShowPrintUI(kind COREWEBVIEW2_PRINT_DIALOG_KIND) error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+	return e.webview.ShowPrintUI(kind)
+}
+
+type capturePreviewRequest struct {
+	stream   *w32.IUnknown
+	handler  *ICoreWebView2CapturePreviewCompletedHandler
+	chromium *Chromium
+}
+
+func (r *capturePreviewRequest) QueryInterface(_, _ uintptr) uintptr {
+	return 0
+}
+
+func (r *capturePreviewRequest) AddRef() uintptr {
+	return 1
+}
+
+func (r *capturePreviewRequest) Release() uintptr {
+	return 1
+}
+
+func (r *capturePreviewRequest) CapturePreviewCompleted(result uintptr) uintptr {
+	if r.stream != nil {
+		r.stream.Release()
+		r.stream = nil
+	}
+	if r.chromium != nil && r.handler != nil {
+		r.chromium.previewRequests.Delete(uintptr(unsafe.Pointer(r.handler)))
+	}
+	if int32(result) < 0 {
+		log.Printf("截图预览失败: %08x", result)
+	}
+	return 0
+}
+
+func createPreviewFileStream(path string) (*w32.IUnknown, error) {
+	var stream *w32.IUnknown
+	hr, _, _ := shCreateStreamOnFileExProc.Call(
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(path))),
+		uintptr(stgmCreate|stgmWrite|stgmShareExclusive),
+		uintptr(windows.FILE_ATTRIBUTE_NORMAL),
+		1,
+		0,
+		uintptr(unsafe.Pointer(&stream)),
+	)
+	if int32(hr) < 0 {
+		return nil, fmt.Errorf("create preview stream failed: %08x", hr)
+	}
+	return stream, nil
+}
+
+func (e *Chromium) CapturePreview(path string) error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+
+	stream, err := createPreviewFileStream(path)
+	if err != nil {
+		return err
+	}
+
+	request := &capturePreviewRequest{
+		stream:   stream,
+		chromium: e,
+	}
+	request.handler = newICoreWebView2CapturePreviewCompletedHandler(request)
+
+	key := uintptr(unsafe.Pointer(request.handler))
+	e.previewRequests.Store(key, request)
+
+	hr, _, _ := e.webview.vtbl.CapturePreview.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG),
+		uintptr(unsafe.Pointer(stream)),
+		uintptr(unsafe.Pointer(request.handler)),
+	)
+	if int32(hr) < 0 {
+		e.previewRequests.Delete(key)
+		stream.Release()
+		return fmt.Errorf("capture preview request failed: %08x", hr)
 	}
 
 	return nil
@@ -498,50 +613,57 @@ func (e *Chromium) EnableContextMenu() error {
 
 // Dispatch 在主线程中执行函数
 func (e *Chromium) Dispatch(f func()) {
-	if e.webview == nil {
+	if e.webview == nil || f == nil {
 		return
 	}
 
-	// 创建个通道来同步执行
-	done := make(chan struct{})
+	e.dispatch.Lock()
+	e.dispatch.queue = append(e.dispatch.queue, f)
+	e.dispatch.Unlock()
 
-	go func() {
-		// 在主线程中执行函数
-		_, _, _ = e.webview.vtbl.ExecuteScript.Call(
-			uintptr(unsafe.Pointer(e.webview)),
-			uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(
-				`window.setTimeout(() => { window.chrome.webview.postMessage('__dispatch__'); }, 0);`,
-			))),
-			0,
-		)
+	// 通过固定的内部消息触发主线程执行，避免覆盖外部消息回调。
+	_, _, _ = e.webview.vtbl.ExecuteScript.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(
+			`window.setTimeout(() => { window.chrome.webview.postMessage('__dispatch__'); }, 0);`,
+		))),
+		0,
+	)
+}
 
-		// 等待执行完成
-		<-done
-	}()
-
-	// 设置一个临时的消息处理器
-	oldCallback := e.MessageCallback
-	e.MessageCallback = func(msg string) {
-		if msg == "__dispatch__" {
-			f()
-			e.MessageCallback = oldCallback
-			close(done)
-		} else if oldCallback != nil {
-			oldCallback(msg)
-		}
+func (e *Chromium) HandleDispatchMessage(msg string) bool {
+	if msg != "__dispatch__" {
+		return false
 	}
+
+	e.dispatch.Lock()
+	if len(e.dispatch.queue) == 0 {
+		e.dispatch.Unlock()
+		return true
+	}
+	f := e.dispatch.queue[0]
+	e.dispatch.queue = e.dispatch.queue[1:]
+	e.dispatch.Unlock()
+
+	f()
+	return true
 }
 
 // HandleWebMessage 处理来自 WebView 的消息
-func (e *Chromium) HandleWebMessage(message string) {
+func (e *Chromium) HandleWebMessage(message string) bool {
 	var msg struct {
 		Type    string          `json:"type"`
 		Payload json.RawMessage `json:"payload"`
+		URL     string          `json:"url"`
+		Loading bool            `json:"loading"`
+		Title   string          `json:"title"`
 	}
 
 	if err := json.Unmarshal([]byte(message), &msg); err != nil {
-		log.Printf("Failed to parse message: %v", err)
-		return
+		return false
+	}
+	if msg.Type == "" {
+		return false
 	}
 
 	switch msg.Type {
@@ -549,11 +671,19 @@ func (e *Chromium) HandleWebMessage(message string) {
 		var payload struct {
 			URL string `json:"url"`
 		}
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			log.Printf("Failed to parse navigate payload: %v", err)
-			return
+		if len(msg.Payload) > 0 {
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				log.Printf("解析 navigate 消息失败: %v", err)
+				return true
+			}
+		} else {
+			payload.URL = msg.URL
+		}
+		if payload.URL == "" {
+			return true
 		}
 		e.Navigate(payload.URL)
+		return true
 
 	case "stateChange":
 		var payload struct {
@@ -561,16 +691,24 @@ func (e *Chromium) HandleWebMessage(message string) {
 			URL     string `json:"url"`
 			Title   string `json:"title"`
 		}
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			log.Printf("Failed to parse state change payload: %v", err)
-			return
+		if len(msg.Payload) > 0 {
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				log.Printf("解析 stateChange 消息失败: %v", err)
+				return true
+			}
+		} else {
+			payload.Loading = msg.Loading
+			payload.URL = msg.URL
+			payload.Title = msg.Title
 		}
 		e.updateState(func(c *Chromium) {
 			c.state.isLoading = payload.Loading
 			c.state.currentURL = payload.URL
 			c.state.currentTitle = payload.Title
 		})
+		return true
 	}
+	return false
 }
 
 // 添加消息处理回调设置方法
