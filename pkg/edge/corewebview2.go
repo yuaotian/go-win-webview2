@@ -456,6 +456,32 @@ func (i *ICoreWebView2) AddSourceChanged(eventHandler *ICoreWebView2SourceChange
 	return nil
 }
 
+func (i *ICoreWebView2) AddNewWindowRequested(eventHandler *ICoreWebView2NewWindowRequestedEventHandler, token *_EventRegistrationToken) error {
+	var err error
+	_, _, err = i.vtbl.AddNewWindowRequested.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) AddWindowCloseRequested(eventHandler *ICoreWebView2WindowCloseRequestedEventHandler, token *_EventRegistrationToken) error {
+	var err error
+	_, _, err = i.vtbl.AddWindowCloseRequested.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
 func (i *ICoreWebView2) AddDocumentTitleChanged(eventHandler *ICoreWebView2DocumentTitleChangedEventHandler, token *_EventRegistrationToken) error {
 	var err error
 	_, _, err = i.vtbl.AddDocumentTitleChanged.Call(
@@ -514,6 +540,51 @@ func (i *ICoreWebView2) GetDocumentTitle() (string, error) {
 	return w32.Utf16PtrToString(title), nil
 }
 
+func (i *ICoreWebView2) CallDevToolsProtocolMethod(methodName string, parametersAsJSON string, handler *ICoreWebView2CallDevToolsProtocolMethodCompletedHandler) error {
+	methodPtr, err := windows.UTF16PtrFromString(methodName)
+	if err != nil {
+		return err
+	}
+	paramsPtr, err := windows.UTF16PtrFromString(parametersAsJSON)
+	if err != nil {
+		return err
+	}
+
+	var handlerPtr uintptr
+	if handler != nil {
+		handlerPtr = uintptr(unsafe.Pointer(handler))
+	}
+
+	_, _, err = i.vtbl.CallDevToolsProtocolMethod.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(methodPtr)),
+		uintptr(unsafe.Pointer(paramsPtr)),
+		handlerPtr,
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+func (i *ICoreWebView2) GetDevToolsProtocolEventReceiver(eventName string) (*ICoreWebView2DevToolsProtocolEventReceiver, error) {
+	eventNamePtr, err := windows.UTF16PtrFromString(eventName)
+	if err != nil {
+		return nil, err
+	}
+
+	var receiver *ICoreWebView2DevToolsProtocolEventReceiver
+	_, _, err = i.vtbl.GetDevToolsProtocolEventReceiver.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventNamePtr)),
+		uintptr(unsafe.Pointer(&receiver)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return nil, err
+	}
+	return receiver, nil
+}
+
 func (i *ICoreWebView2) OpenDevToolsWindow() error {
 	_, _, err := i.vtbl.OpenDevToolsWindow.Call(
 		uintptr(unsafe.Pointer(i)),
@@ -549,4 +620,14 @@ type ICoreWebView2Deferral struct {
 type iCoreWebView2DeferralVtbl struct {
 	_IUnknownVtbl
 	Complete ComProc
+}
+
+func (i *ICoreWebView2Deferral) Complete() error {
+	_, _, err := i.vtbl.Complete.Call(
+		uintptr(unsafe.Pointer(i)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
 }

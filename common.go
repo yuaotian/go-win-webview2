@@ -114,17 +114,24 @@ type WebView interface {
 	CloseDevTools() // 关闭开发者工具
 
 	// 状态监听
-	OnLoadingStateChanged(func(isLoading bool))  // 加载状态变化
-	OnURLChanged(func(url string))               // URL 变化
-	OnTitleChanged(func(title string))           // 标题变化
-	OnFullscreenChanged(func(isFullscreen bool)) // 全屏状态变化
-	OnNavigationStarting(func())                 // 导航开始
+	OnLoadingStateChanged(func(isLoading bool))          // 加载状态变化
+	OnURLChanged(func(url string))                       // URL 变化
+	OnTitleChanged(func(title string))                   // 标题变化
+	OnFullscreenChanged(func(isFullscreen bool))         // 全屏状态变化
+	OnNavigationStarting(func())                         // 导航开始
+	OnNewWindowRequested(func(*NewWindowRequestedEvent)) // 新窗口请求
+	OnWindowCloseRequested(func())                       // 页面请求关闭窗口
 
 	// 打印相关方法
-	Print()                           // 直接打印
-	PrintToPDF(path string)           // 打印到 PDF 文件
-	ShowPrintDialog()                 // 显示打印对话框
-	CapturePreview(path string) error // 截图当前视口到文件
+	Print()                                                                     // 直接打印
+	PrintToPDF(path string)                                                     // 打印到 PDF 文件
+	ShowPrintDialog()                                                           // 显示打印对话框
+	CapturePreview(path string) error                                           // 截图当前视口到文件
+	CapturePreviewWithOptions(path string, options CapturePreviewOptions) error // 带选项截图
+
+	// DevTools Protocol 相关方法
+	CallDevToolsProtocolMethod(method string, paramsJSON string, callback func(error, string)) error
+	SubscribeDevToolsProtocolEvent(eventName string, handler func(string)) (func(), error)
 
 	// 右键菜单控制
 	DisableContextMenu() error // 禁用右键菜单

@@ -43,6 +43,8 @@ type Chromium struct {
 	permissionRequested   *iCoreWebView2PermissionRequestedEventHandler
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
+	newWindowRequested    *ICoreWebView2NewWindowRequestedEventHandler
+	windowCloseRequested  *ICoreWebView2WindowCloseRequestedEventHandler
 	navigationStarting    *ICoreWebView2NavigationStartingEventHandler
 	sourceChanged         *ICoreWebView2SourceChangedEventHandler
 	documentTitleChanged  *ICoreWebView2DocumentTitleChangedEventHandler
@@ -60,6 +62,8 @@ type Chromium struct {
 	// Callbacks
 	MessageCallback              func(string)
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
+	NewWindowRequestedCallback   func(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs)
+	WindowCloseRequestedCallback func()
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
 	NavigationStartingCallback   func()
@@ -87,7 +91,9 @@ type Chromium struct {
 		sync.Mutex
 	}
 
-	previewRequests sync.Map
+	previewRequests  sync.Map
+	devToolsRequests sync.Map
+	devToolsEvents   sync.Map
 }
 
 func NewChromium() *Chromium {
@@ -110,6 +116,8 @@ func NewChromium() *Chromium {
 	e.permissionRequested = newICoreWebView2PermissionRequestedEventHandler(e)
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
+	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
+	e.windowCloseRequested = newICoreWebView2WindowCloseRequestedEventHandler(e)
 	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
 	e.sourceChanged = newICoreWebView2SourceChangedEventHandler(e)
 	e.documentTitleChanged = newICoreWebView2DocumentTitleChangedEventHandler(e)
@@ -273,6 +281,12 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(e.webResourceRequested)),
 		uintptr(unsafe.Pointer(&token)),
 	)
+	if err := e.webview.AddNewWindowRequested(e.newWindowRequested, &token); err != nil {
+		log.Fatal(err)
+	}
+	if err := e.webview.AddWindowCloseRequested(e.windowCloseRequested, &token); err != nil {
+		log.Fatal(err)
+	}
 
 	// 补齐原生导航、URL 和标题事件，驱动外层状态监听。
 	if err := e.webview.AddNavigationStarting(e.navigationStarting, &token); err != nil {
@@ -355,6 +369,24 @@ func (e *Chromium) WebResourceRequested(sender *ICoreWebView2, args *ICoreWebVie
 	if e.WebResourceRequestedCallback != nil {
 		e.WebResourceRequestedCallback(req, args)
 	}
+	return 0
+}
+
+func (e *Chromium) NewWindowRequested(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs) uintptr {
+	if e.NewWindowRequestedCallback != nil {
+		e.NewWindowRequestedCallback(sender, args)
+	}
+	return 0
+}
+
+func (e *Chromium) WindowCloseRequested(_ *ICoreWebView2, _ *iUnknown) uintptr {
+	if e.WindowCloseRequestedCallback != nil {
+		e.WindowCloseRequestedCallback()
+		return 0
+	}
+
+	// 默认沿用现有窗口关闭语义，避免页面 window.close() 变成空操作。
+	_, _, _ = w32.User32PostMessageW.Call(e.hwnd, w32.WMClose, 0, 0)
 	return 0
 }
 
@@ -470,6 +502,10 @@ func (e *Chromium) OpenDevToolsWindow() error {
 	return e.webview.OpenDevToolsWindow()
 }
 
+func (e *Chromium) CoreWebView2() *ICoreWebView2 {
+	return e.webview
+}
+
 // PrintToPDF 将当前页面打印到 PDF 文件
 func (e *Chromium) PrintToPDF(path string) error {
 	if e.webview == nil {
@@ -552,6 +588,10 @@ func createPreviewFileStream(path string) (*w32.IUnknown, error) {
 }
 
 func (e *Chromium) CapturePreview(path string) error {
+	return e.CapturePreviewWithFormat(path, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG)
+}
+
+func (e *Chromium) CapturePreviewWithFormat(path string, format COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT) error {
 	if e.webview == nil {
 		return errors.New("webview not initialized")
 	}
@@ -572,7 +612,7 @@ func (e *Chromium) CapturePreview(path string) error {
 
 	hr, _, _ := e.webview.vtbl.CapturePreview.Call(
 		uintptr(unsafe.Pointer(e.webview)),
-		uintptr(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG),
+		uintptr(format),
 		uintptr(unsafe.Pointer(stream)),
 		uintptr(unsafe.Pointer(request.handler)),
 	)
@@ -583,6 +623,133 @@ func (e *Chromium) CapturePreview(path string) error {
 	}
 
 	return nil
+}
+
+type devToolsMethodRequest struct {
+	handler  *ICoreWebView2CallDevToolsProtocolMethodCompletedHandler
+	chromium *Chromium
+	callback func(error, string)
+}
+
+func (r *devToolsMethodRequest) QueryInterface(_, _ uintptr) uintptr {
+	return 0
+}
+
+func (r *devToolsMethodRequest) AddRef() uintptr {
+	return 1
+}
+
+func (r *devToolsMethodRequest) Release() uintptr {
+	return 1
+}
+
+func (r *devToolsMethodRequest) CallDevToolsProtocolMethodCompleted(errorCode uintptr, result *uint16) uintptr {
+	if r.chromium != nil && r.handler != nil {
+		r.chromium.devToolsRequests.Delete(uintptr(unsafe.Pointer(r.handler)))
+	}
+	if r.callback != nil {
+		if int32(errorCode) < 0 {
+			r.callback(fmt.Errorf("devtools 协议调用失败: %08x", errorCode), "")
+		} else {
+			r.callback(nil, w32.Utf16PtrToString(result))
+		}
+	}
+	return 0
+}
+
+func (e *Chromium) CallDevToolsProtocolMethod(method string, paramsJSON string, callback func(error, string)) error {
+	if e.webview == nil {
+		return errors.New("webview not initialized")
+	}
+
+	if callback == nil {
+		return e.webview.CallDevToolsProtocolMethod(method, paramsJSON, nil)
+	}
+
+	request := &devToolsMethodRequest{
+		chromium: e,
+		callback: callback,
+	}
+	request.handler = newICoreWebView2CallDevToolsProtocolMethodCompletedHandler(request)
+
+	key := uintptr(unsafe.Pointer(request.handler))
+	e.devToolsRequests.Store(key, request)
+	if err := e.webview.CallDevToolsProtocolMethod(method, paramsJSON, request.handler); err != nil {
+		e.devToolsRequests.Delete(key)
+		return err
+	}
+	return nil
+}
+
+type devToolsEventSubscription struct {
+	handler  *ICoreWebView2DevToolsProtocolEventReceivedEventHandler
+	receiver *ICoreWebView2DevToolsProtocolEventReceiver
+	token    _EventRegistrationToken
+	chromium *Chromium
+	callback func(string)
+}
+
+func (s *devToolsEventSubscription) QueryInterface(_, _ uintptr) uintptr {
+	return 0
+}
+
+func (s *devToolsEventSubscription) AddRef() uintptr {
+	return 1
+}
+
+func (s *devToolsEventSubscription) Release() uintptr {
+	return 1
+}
+
+func (s *devToolsEventSubscription) DevToolsProtocolEventReceived(_ *ICoreWebView2, args *ICoreWebView2DevToolsProtocolEventReceivedEventArgs) uintptr {
+	if s.callback == nil {
+		return 0
+	}
+	jsonText, err := args.GetParameterObjectAsJson()
+	if err != nil {
+		log.Printf("读取 DevTools 事件参数失败: %v", err)
+		return 0
+	}
+	s.callback(jsonText)
+	return 0
+}
+
+func (e *Chromium) SubscribeDevToolsProtocolEvent(eventName string, handler func(string)) (func(), error) {
+	if e.webview == nil {
+		return nil, errors.New("webview not initialized")
+	}
+	receiver, err := e.webview.GetDevToolsProtocolEventReceiver(eventName)
+	if err != nil {
+		return nil, err
+	}
+
+	subscription := &devToolsEventSubscription{
+		receiver: receiver,
+		chromium: e,
+		callback: handler,
+	}
+	subscription.handler = newICoreWebView2DevToolsProtocolEventReceivedEventHandler(subscription)
+
+	var token _EventRegistrationToken
+	if err := receiver.AddDevToolsProtocolEventReceived(subscription.handler, &token); err != nil {
+		receiver.Release()
+		return nil, err
+	}
+	subscription.token = token
+
+	key := uintptr(unsafe.Pointer(subscription.handler))
+	e.devToolsEvents.Store(key, subscription)
+
+	unsubscribe := func() {
+		if subscription.receiver != nil {
+			_ = subscription.receiver.RemoveDevToolsProtocolEventReceived(subscription.token)
+			subscription.receiver.Release()
+			subscription.receiver = nil
+		}
+		e.devToolsEvents.Delete(key)
+	}
+
+	return unsubscribe, nil
 }
 
 // 添加打印相关的回调处理
@@ -733,6 +900,14 @@ func (e *Chromium) SetTitleChangedCallback(callback func(string)) {
 	e.callbacks.Lock()
 	defer e.callbacks.Unlock()
 	e.callbacks.onTitleChanged = callback
+}
+
+func (e *Chromium) SetNewWindowRequestedCallback(callback func(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs)) {
+	e.NewWindowRequestedCallback = callback
+}
+
+func (e *Chromium) SetWindowCloseRequestedCallback(callback func()) {
+	e.WindowCloseRequestedCallback = callback
 }
 
 // 加状态管理方法
